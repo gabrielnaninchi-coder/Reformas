@@ -1473,7 +1473,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    const swCode = "const CACHE='mmr-v8';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
+    const swCode = "const CACHE='mmr-v9';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
     const blob = new Blob([swCode], { type: 'application/javascript' });
     navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
   });
