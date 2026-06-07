@@ -16,7 +16,7 @@
 <style>
   * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #2a241f; overscroll-behavior: none; }
-  #root { min-height: 100vh; }
+  #root { min-height: 100vh; min-height: 100dvh; }
   ::-webkit-scrollbar { width: 0; }
   @media (display-mode: standalone) { body { user-select: none; } }
 </style>
@@ -451,32 +451,30 @@ function generateQuotePDF(quote, client, project, company, catalog, simPairs){
 
   // Página de simulaciones IA (antes / después)
   if(simPairs && simPairs.length){
+    const fmt=(src)=>{ try{ return doc.getImageProperties(src).fileType||"JPEG"; }catch(e){ return "JPEG"; } };
     doc.addPage();
     let yy=M;
     doc.setFillColor(17,17,17); doc.rect(M,yy,W-2*M,12,"F");
     doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(11);
     doc.text("Simulación de la reforma", M+4, yy+8); yy+=18;
-    const gap=6, colW=(W-2*M-gap)/2, cellH=colW*0.75; // proporción 4:3
+    const gap=6, colW=(W-2*M-gap)/2, cellH=colW*0.75;
     simPairs.slice(0,3).forEach((pair)=>{
-      const blockH=cellH+12;
+      const blockH=cellH+16;
       if(yy+blockH>282){ doc.addPage(); yy=M; }
       if(pair.before){
-        // Dos columnas: ANTES | DESPUÉS
         doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.setTextColor(120,120,120);
         doc.text("ANTES", M, yy+4);
         doc.text("DESPUÉS", M+colW+gap, yy+4);
-        try{ doc.addImage(pair.before,"JPEG",M,yy+6,colW,cellH); }catch(e){}
-        try{ doc.addImage(pair.after,"JPEG",M+colW+gap,yy+6,colW,cellH); }catch(e){}
-        // marco al "después" para destacarlo
+        doc.addImage(pair.before,fmt(pair.before),M,yy+6,colW,cellH);
+        doc.addImage(pair.after,fmt(pair.after),M+colW+gap,yy+6,colW,cellH);
         doc.setDrawColor(200,90,50); doc.setLineWidth(0.6); doc.rect(M+colW+gap,yy+6,colW,cellH);
         doc.setDrawColor(210,210,210); doc.setLineWidth(0.3); doc.rect(M,yy+6,colW,cellH);
         yy+=cellH+16;
       }else{
-        // Solo resultado, a ancho completo razonable
         doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.setTextColor(120,120,120);
         doc.text("SIMULACIÓN", M, yy+4);
-        const fullH=Math.min(110,(W-2*M)*0.66);
-        try{ doc.addImage(pair.after,"JPEG",M,yy+6,W-2*M,fullH); }catch(e){}
+        const fullH=Math.min(120,(W-2*M)*0.66);
+        doc.addImage(pair.after,fmt(pair.after),M,yy+6,W-2*M,fullH);
         doc.setDrawColor(200,90,50); doc.setLineWidth(0.6); doc.rect(M,yy+6,W-2*M,fullH);
         yy+=fullH+16;
       }
@@ -673,9 +671,9 @@ function Section({title,action}){return <div style={{display:"flex",justifyConte
 function Row({onClick,children}){return <div onClick={onClick} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:14,marginBottom:10,cursor:onClick?"pointer":"default",display:"flex",alignItems:"center",gap:12}}>{children}</div>;}
 function Avatar({name,color}){const init=(name||"?").split(" ").map(w=>w[0]).slice(0,2).join("").toUpperCase();
   return <div style={{width:42,height:42,borderRadius:12,flexShrink:0,background:(color||C.clay)+"1a",color:color||C.clay,display:"grid",placeItems:"center",fontWeight:700,fontSize:14,fontFamily:"Fraunces,serif"}}>{init}</div>;}
-function Header({title,onBack,right}){return <div style={{display:"flex",alignItems:"center",gap:10,padding:"18px 4px 6px"}}>
-  {onBack&&<button onClick={onBack} style={{background:"none",border:"none",cursor:"pointer",padding:4,marginLeft:-4,color:C.ink,display:"grid",placeItems:"center"}}><I.back size={24}/></button>}
-  <h1 style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:600,color:C.ink,margin:0,flex:1,letterSpacing:"-.02em"}}>{title}</h1>{right}</div>;}
+function Header({title,onBack,right}){return <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0 10px",minHeight:44}}>
+  {onBack&&<button onClick={onBack} style={{background:"none",border:"none",cursor:"pointer",width:40,height:40,marginLeft:-8,color:C.ink,display:"grid",placeItems:"center",flexShrink:0}}><I.back size={24}/></button>}
+  <h1 style={{fontFamily:"Fraunces,serif",fontSize:22,fontWeight:600,color:C.ink,margin:0,flex:1,letterSpacing:"-.02em",minWidth:0}}>{title}</h1>{right}</div>;}
 function InfoLine({label,value,last}){return <div style={{padding:"11px 0",borderBottom:last?"none":`1px solid ${C.line}`}}>
   <div style={{fontSize:11.5,color:C.muted,marginBottom:2}}>{label}</div><div style={{fontSize:14,color:C.ink}}>{value}</div></div>;}
 function Chip({active,onClick,children}){return <button onClick={onClick} style={{padding:"8px 14px",borderRadius:22,fontSize:13,fontWeight:600,cursor:"pointer",border:`1px solid ${active?C.ink:C.line}`,background:active?C.ink:C.card,color:active?C.paper:C.ink}}>{children}</button>;}
@@ -721,7 +719,7 @@ function HomeScreen({data,go}){
   );
 
   return <div>
-    <div style={{padding:"20px 4px 4px"}}>
+    <div style={{padding:"6px 0 4px"}}>
       <div style={{fontSize:13,color:C.muted}}>{data.company.brand}</div>
       <h1 style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:600,color:C.ink,margin:"2px 0 0"}}>Hola, Mariano 👋</h1>
     </div>
@@ -1114,9 +1112,23 @@ function QuoteScreen({data,id,go,update}){
         <span style={{fontWeight:700,color:C.ink}}>Total</span><span style={{fontWeight:700,color:C.clay,fontSize:20,fontFamily:"Fraunces,serif"}}>{eur(t.total)}</span></div></div>
     <Section title="Estado"/>
     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{Object.keys(QUOTE_STATUS).map(s=><Chip key={s} active={qt.status===s} onClick={()=>setStatus(s)}>{QUOTE_STATUS[s].label}</Chip>)}</div>
-    {qt.simIds&&qt.simIds.length>0&&<><Section title={`Simulaciones adjuntas (${qt.simIds.length})`}/>
-      <div style={{display:"flex",flexDirection:"column",gap:10}}>{qt.simIds.slice(0,3).map(sid=>{const meta=(data.sims||[]).find(s=>s.id===sid);return meta?<SimPair key={sid} sim={meta} height={110}/>:<div key={sid} style={{borderRadius:10,overflow:"hidden",border:`1px solid ${C.line}`}}><SimImg simId={sid} style={{width:"100%",height:110,objectFit:"cover",display:"block"}}/></div>;})}</div>
-      <div style={{fontSize:11.5,color:C.muted,marginTop:6}}>Se incluirán en el PDF del presupuesto.</div></>}
+    {(()=>{
+      const clientSims=(data.sims||[]).filter(s=>s.clientId===qt.clientId);
+      const cur=qt.simIds||[];
+      const toggle=(sid)=>update(d=>({...d,quotes:d.quotes.map(x=>{ if(x.id!==id) return x; const has=(x.simIds||[]).includes(sid);
+        if(has) return {...x,simIds:(x.simIds||[]).filter(y=>y!==sid)};
+        if((x.simIds||[]).length>=3) return x; return {...x,simIds:[...(x.simIds||[]),sid]}; })}));
+      return <><Section title={`Antes/Después en el PDF (${cur.length}/3)`} action={<button onClick={()=>go("ai",{clientId:qt.clientId})} style={lnk}>+ Crear</button>}/>
+        {clientSims.length===0?<div style={{...empty,padding:"14px 0",fontSize:12.5}}>Este cliente no tiene simulaciones. Pulsa “+ Crear” para generarlas y se adjuntarán aquí.</div>
+        :<><div style={{fontSize:12.5,color:C.muted,marginBottom:8}}>Toca para adjuntar/quitar. Saldrán en el PDF.</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>{clientSims.map(s=>{const on=cur.includes(s.id);
+          return <div key={s.id} onClick={()=>toggle(s.id)} style={{borderRadius:12,overflow:"hidden",border:`2px solid ${on?C.clay:C.line}`,position:"relative",cursor:"pointer"}}>
+            <SimPair sim={s} height={120}/>
+            {on&&<div style={{position:"absolute",top:8,right:8,background:C.clay,borderRadius:"50%",width:26,height:26,display:"grid",placeItems:"center",zIndex:2}}><I.check size={15} color="#fff"/></div>}
+            <div style={{padding:"6px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:11.5,color:C.muted}}>{s.type} · {s.style}{s.hasBefore?" · antes/después":" · solo resultado"}</span>{on&&<span style={{fontSize:11,color:C.clay,fontWeight:700}}>Adjunta</span>}</div>
+          </div>;})}</div></>}
+      </>;
+    })()}
     <Section title="Texto del documento" action={<button onClick={()=>go("editDoc",id)} style={lnk}>Editar</button>}/>
     <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"4px 14px"}}>
       <InfoLine label="Descripción del trabajo" value={qt.projDesc||"(sin texto · usa el predeterminado)"}/>
@@ -1148,7 +1160,7 @@ function InvoicesScreen({data,go}){
   const cobrar=pend.reduce((s,f)=>s+computeQuote(f,data.catalog).total,0);
   const cobrado=invoices.filter(f=>f.status==="pagada").reduce((s,f)=>s+computeQuote(f,data.catalog).total,0);
   return <div>
-    <div style={{padding:"20px 4px 4px"}}><h1 style={{fontFamily:"Fraunces,serif",fontSize:24,fontWeight:600,color:C.ink,margin:0}}>Facturas</h1></div>
+    <div style={{padding:"6px 0 4px"}}><h1 style={{fontFamily:"Fraunces,serif",fontSize:24,fontWeight:600,color:C.ink,margin:0}}>Facturas</h1></div>
     <div style={{display:"flex",gap:10,marginTop:14}}>
       <div style={{flex:1,background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"12px 14px"}}><div style={{fontSize:11.5,color:C.muted}}>Por cobrar</div><div style={{fontSize:18,fontWeight:700,color:C.clay,fontFamily:"Fraunces,serif"}}>{eur(cobrar)}</div></div>
       <div style={{flex:1,background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"12px 14px"}}><div style={{fontSize:11.5,color:C.muted}}>Cobrado</div><div style={{fontSize:18,fontWeight:700,color:C.sage,fontFamily:"Fraunces,serif"}}>{eur(cobrado)}</div></div>
@@ -1441,7 +1453,7 @@ function App(){
     }
   };
   return <div style={{minHeight:"100vh",background:C.paper,display:"flex",flexDirection:"column",fontFamily:"'Public Sans',-apple-system,sans-serif",maxWidth:480,margin:"0 auto"}}>
-    <div id="scroll" style={{flex:1,overflowY:"auto",padding:"0 18px calc(18px + env(safe-area-inset-bottom))"}}>{render()}</div>
+    <div id="scroll" style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"calc(12px + env(safe-area-inset-top)) max(18px, env(safe-area-inset-left)) calc(18px + env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-right))"}}>{render()}</div>
     <div style={{display:"flex",background:C.card,borderTop:`1px solid ${C.line}`,padding:"8px 4px calc(10px + env(safe-area-inset-bottom))",flexShrink:0}}>
       {TABS.map(t=>{const on=activeTab===t.key;return <button key={t.key} onClick={()=>go(t.key)} style={{flex:1,background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,color:on?C.clay:C.muted,padding:"4px 0"}}>
         <t.icon size={20} sw={on?2.4:2} color={on?C.clay:C.muted}/><span style={{fontSize:9.5,fontWeight:on?700:500}}>{t.label}</span></button>;})}</div>
@@ -1461,7 +1473,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    const swCode = "const CACHE='mmr-v7';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
+    const swCode = "const CACHE='mmr-v8';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
     const blob = new Blob([swCode], { type: 'application/javascript' });
     navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
   });
