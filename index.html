@@ -52,6 +52,10 @@ const QUOTE_STATUS = {
   borrador:{label:"Borrador",color:C.muted}, enviado:{label:"Enviado",color:C.amber},
   aceptado:{label:"Aceptado",color:C.sage}, rechazado:{label:"Rechazado",color:C.clayDk},
 };
+const INVOICE_STATUS = {
+  pendiente:{label:"Pendiente",color:C.amber}, pagada:{label:"Pagada",color:C.sage},
+  vencida:{label:"Vencida",color:C.clayDk}, anulada:{label:"Anulada",color:C.muted},
+};
 
 /* ---------- Iconos ---------- */
 const Ico=({d,size=20,sw=2,fill="none",color="currentColor"})=>React.createElement("svg",
@@ -80,6 +84,7 @@ const I={
   trash:(p)=><Ico {...p} d={["M3 6h18","M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6","M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"]}/>,
   x:(p)=><Ico {...p} d={["M18 6L6 18","M6 6l12 12"]}/>,
   pdf:(p)=><Ico {...p} d={["M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z","M14 2v6h6","M9 15h6","M9 18h4"]}/>,
+  receipt:(p)=><Ico {...p} d={["M4 2v20l2-1.5L8 22l2-1.5L12 22l2-1.5L16 22l2-1.5L20 22V2l-2 1.5L16 2l-2 1.5L12 2l-2 1.5L8 2 6 3.5 4 2z","M8 8h8","M8 12h8"]}/>,
   key:(p)=><Ico {...p} d={["M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3"]}/>,
   lock:(p)=><Ico {...p} d={["M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z","M7 11V7a5 5 0 0 1 10 0v4"]}/>,
 };
@@ -89,7 +94,7 @@ const DEFAULT_COMPANY = {
   name:"Mariano Martínez Recalde", brand:"MMR servicios", nif:"Y1516183Z",
   address:"Calle Maestro Serrano 14 bj, Meseros (Valencia) 46136",
   phone:"605 108 895", email:"recalde.mmr@gmail.com",
-  iban:"ES63 0182 05XX XXXX XXXX XXXX", series:"2026", nextNumber:204,
+  iban:"ES63 0182 05XX XXXX XXXX XXXX", series:"2026", nextNumber:204, nextInvoice:1,
 };
 
 /* ---------- Niveles de calidad de material ---------- */
@@ -184,6 +189,7 @@ const SEED = {
     {id:"q1",number:"203",clientId:"cl1",projectId:"pr1",date:"2025-09-22",validity:30,status:"aceptado",discount:0,
       lines:[{itemId:"c34",qty:2,quality:"std"},{itemId:"c35",qty:1,quality:"std"},{itemId:"c36",qty:1,quality:"std"}]},
   ],
+  invoices:[],
   settings: { apiKey:"", pin:"", pinEnabled:false, aiQuality:"high" },
 };
 
@@ -192,6 +198,8 @@ const STORE_KEY="mmr_data_v2";
 function loadData(){
   try{ const r=localStorage.getItem(STORE_KEY); if(r){const d=JSON.parse(r);
     return {...JSON.parse(JSON.stringify(SEED)), ...d,
+      invoices: d.invoices || [],
+      catalog: (d.catalog && d.catalog.length) ? d.catalog : buildCatalog(),
       company:{...DEFAULT_COMPANY,...(d.company||{})}, settings:{...SEED.settings,...(d.settings||{})}};}
   }catch(e){}
   return JSON.parse(JSON.stringify(SEED));
@@ -365,6 +373,78 @@ function generateQuotePDF(quote, client, project, company, catalog){
   return doc;
 }
 
+/* ---------- PDF de FACTURA (variante del presupuesto) ---------- */
+function generateInvoicePDF(inv, client, company, catalog){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({unit:"mm",format:"a4"});
+  const W = 210, M = 14;
+  const t = computeQuote(inv, catalog);
+  let y = M;
+  // Cabecera
+  doc.setFillColor(17,17,17); doc.rect(M, y, W-2*M, 34, "F");
+  try{ doc.setFillColor(255,255,255); doc.roundedRect(M+4,y+4,40,26,2,2,"F");
+    if(window.MMR_LOGO) doc.addImage(window.MMR_LOGO,"JPEG",M+6,y+5,36,24);
+  }catch(e){}
+  doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+  const rx=M+52;
+  doc.text(company.name, rx, y+7);
+  doc.setFont("helvetica","normal"); doc.setFontSize(8);
+  doc.text("NIF: "+company.nif, rx, y+12);
+  doc.text("Dir.: "+company.address, rx, y+17, {maxWidth:W-rx-M-2});
+  doc.text("Tel: "+company.phone, rx, y+26);
+  doc.text(company.email, rx, y+31);
+  y += 42;
+  // Título FACTURA
+  doc.setTextColor(17,17,17); doc.setFont("helvetica","bold"); doc.setFontSize(15);
+  doc.text("FACTURA", M, y); 
+  doc.setFontSize(10); doc.setFont("helvetica","normal");
+  doc.text("Nº "+inv.number+"   ·   Fecha: "+inv.date, M, y+6);
+  y += 14;
+  // Datos cliente
+  doc.setFillColor(17,17,17); doc.rect(M,y,W-2*M,7,"F");
+  doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+  doc.text("Datos del cliente", M+3, y+5); y+=9;
+  doc.setTextColor(0,0,0); doc.setFont("helvetica","normal"); doc.setFontSize(9);
+  const cl=client||{};
+  [["Nombre / razón social:", cl.name||"—"],["NIF/CIF/DNI:", cl.nif||"—"],
+   ["Dirección fiscal:", cl.fiscal||"—"]].forEach(([k,v])=>{
+    doc.setFont("helvetica","bold"); doc.text(k,M+1,y);
+    doc.setFont("helvetica","normal"); doc.text(String(v),M+44,y,{maxWidth:W-2*M-46}); y+=5.5;});
+  y+=3;
+  // Tabla
+  const cDesc=M+1, cPrice=W-M-58, cQty=W-M-38, cTot=W-M-2;
+  doc.setFillColor(17,17,17); doc.rect(M,y,W-2*M,7,"F");
+  doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+  doc.text("Concepto",cDesc+1,y+5); doc.text("Precio U.",cPrice,y+5);
+  doc.text("Cant.",cQty,y+5); doc.text("Importe",cTot,y+5,{align:"right"}); y+=7;
+  doc.setTextColor(0,0,0); doc.setFont("helvetica","normal"); doc.setFontSize(9);
+  t.detail.forEach(d=>{
+    const nm=(d.item?.name||"")+(d.item?.hasQuality&&d.quality?(" ("+qLabel(d.quality)+")"):"");
+    doc.text(nm,cDesc+1,y+5,{maxWidth:cPrice-cDesc-5});
+    doc.text(eur(d.unit||0),cPrice,y+5); doc.text(String(d.qty),cQty+2,y+5);
+    doc.text(eur(d.lineBase),cTot,y+5,{align:"right"});
+    doc.setDrawColor(120,160,120); doc.setLineDashPattern([1,1],0); doc.line(M,y+7,W-M,y+7); doc.setLineDashPattern([],0);
+    y+=7;});
+  doc.setDrawColor(0,0,0); doc.setLineWidth(0.3);
+  const tt=y-7*t.detail.length-7;
+  doc.line(cPrice-3,tt,cPrice-3,y); doc.line(cQty-2,tt,cQty-2,y); doc.line(cTot-18,tt,cTot-18,y);
+  y+=4;
+  const row=(l,v,b)=>{doc.rect(M,y,W-2*M,7); doc.setFont("helvetica",b?"bold":"normal"); doc.setFontSize(9.5);
+    doc.text(l,M+2,y+5); doc.text(v,cTot,y+5,{align:"right"}); y+=7;};
+  row("Base imponible", eur(t.baseAfter));
+  row("IVA (21%)", eur(t.ivaTotal));
+  row("TOTAL FACTURA", eur(t.total), true);
+  y+=8;
+  doc.setFont("helvetica","bold"); doc.setFontSize(8.5); doc.text("Forma de pago:", M, y);
+  doc.setFont("helvetica","normal");
+  doc.text(" transferencia bancaria · "+(company.iban||""), M+26, y, {maxWidth:W-2*M-26});
+  y+=10;
+  doc.setTextColor(150,150,150); doc.setFontSize(7);
+  doc.text("Documento de factura generado con MMR Gestión. Para validez fiscal completa (VERI*FACTU) consulte con su asesoría.", M, y, {maxWidth:W-2*M});
+  return doc;
+}
+
+
 /* ============================================================
    LLAMADA A OPENAI — generación de imagen
    ============================================================ */
@@ -433,31 +513,70 @@ function PinGate({pin,onOk}){
 
 /* ---------- Pantallas ---------- */
 function HomeScreen({data,go}){
-  const pend=data.quotes.filter(q=>q.status==="enviado").length;
-  const acep=data.quotes.filter(q=>q.status==="aceptado").length;
-  const obra=data.projects.filter(p=>p.status==="en_obra").length;
-  const cobrar=data.quotes.filter(q=>q.status==="aceptado").reduce((s,q)=>s+computeQuote(q,data.catalog).total,0);
+  const invoices=data.invoices||[];
+  const porEnviar=data.quotes.filter(q=>q.status==="borrador");
+  const enviados=data.quotes.filter(q=>q.status==="enviado");
+  const aceptadosSinFactura=data.quotes.filter(q=>q.status==="aceptado" && !invoices.find(f=>f.fromQuote===q.id));
+  const facturasPend=invoices.filter(f=>f.status==="pendiente"||f.status==="vencida");
+  const cobrar=facturasPend.reduce((s,f)=>s+computeQuote(f,data.catalog).total,0);
+  const obrasCurso=data.projects.filter(p=>p.status==="en_obra");
+  const clientName=(id)=>data.clients.find(c=>c.id===id)?.name||"—";
+
+  const MiniStat=({label,value,tint})=>(
+    <div style={{flex:1,background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"12px 14px"}}>
+      <div style={{fontSize:20,fontWeight:700,color:tint,fontFamily:"Fraunces,serif",lineHeight:1}}>{value}</div>
+      <div style={{fontSize:11.5,color:C.muted,marginTop:4}}>{label}</div></div>);
+  const TaskList=({title,items,empty:emptytxt,render})=> (
+    <><Section title={title}/>{items.length===0?<div style={{...empty,padding:"16px 0",fontSize:12.5}}>{emptytxt}</div>:items.map(render)}</>
+  );
+
   return <div>
     <div style={{padding:"20px 4px 4px"}}>
-      <div style={{fontSize:13,color:C.muted}}>{data.company.brand} · panel</div>
+      <div style={{fontSize:13,color:C.muted}}>{data.company.brand}</div>
       <h1 style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:600,color:C.ink,margin:"2px 0 0"}}>Hola, Mariano 👋</h1>
     </div>
-    <div style={{display:"flex",flexWrap:"wrap",gap:12,marginTop:18}}>
-      <Stat icon={I.clock} label="Presup. pendientes" value={pend} tint={C.amber}/>
-      <Stat icon={I.check} label="Aceptados" value={acep} tint={C.sage}/>
-      <Stat icon={I.hard} label="Obras en curso" value={obra} tint={C.clay}/>
-      <Stat icon={I.euro} label="Por cobrar" value={eur(cobrar)} tint={C.steel}/>
+
+    {/* Acción principal */}
+    <button onClick={()=>go("newQuote")} style={{width:"100%",marginTop:16,background:C.clay,color:"#fff",border:"none",borderRadius:16,padding:"16px",cursor:"pointer",display:"flex",alignItems:"center",gap:12,fontSize:16,fontWeight:700}}>
+      <div style={{width:38,height:38,borderRadius:11,background:"#ffffff22",display:"grid",placeItems:"center"}}><I.file size={20} color="#fff"/></div>
+      Crear presupuesto</button>
+    <div style={{display:"flex",gap:10,marginTop:10}}>
+      <button onClick={()=>go("newClient")} style={{flex:1,background:C.ink,color:C.paper,border:"none",borderRadius:13,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:7}}><I.users size={16} color={C.paper}/> Nuevo cliente</button>
+      <button onClick={()=>go("ai")} style={{flex:1,background:C.ink,color:C.paper,border:"none",borderRadius:13,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:7}}><I.spark size={16} color={C.paper}/> Foto + IA</button>
     </div>
-    <Section title="Acciones rápidas"/>
-    <div style={{display:"flex",gap:10}}>
-      <QuickBtn icon={I.hard} label="Nueva obra" onClick={()=>go("newProject")}/>
-      <QuickBtn icon={I.file} label="Crear presup." onClick={()=>go("newQuote")}/>
-      <QuickBtn icon={I.spark} label="Foto + IA" onClick={()=>go("ai")}/>
+
+    {/* Cifras de un vistazo */}
+    <div style={{display:"flex",gap:10,marginTop:16}}>
+      <MiniStat label="Por enviar" value={porEnviar.length} tint={C.muted}/>
+      <MiniStat label="Esperando respuesta" value={enviados.length} tint={C.amber}/>
+      <MiniStat label="Por cobrar" value={eur(cobrar)} tint={C.sage}/>
     </div>
-    <Section title="Últimos clientes" action={<button onClick={()=>go("clients")} style={lnk}>Ver todos</button>}/>
-    {data.clients.slice(0,3).map(cl=><Row key={cl.id} onClick={()=>go("client",cl.id)}>
+
+    {/* Tareas accionables */}
+    {aceptadosSinFactura.length>0 && <TaskList title="✅ Aceptados · listos para facturar" items={aceptadosSinFactura} empty="" render={qt=>{const t=computeQuote(qt,data.catalog);
+      return <Row key={qt.id} onClick={()=>go("quote",qt.id)}><div style={iconBox(C.sage)}><I.check size={18} color={C.sage}/></div>
+        <div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,color:C.ink,fontSize:14}}>Nº {qt.number} · {clientName(qt.clientId)}</div>
+          <div style={{fontSize:12.5,color:C.muted}}>{eur(t.total)} · toca para facturar</div></div><I.fwd size={18} color={C.muted}/></Row>;}}/>}
+
+    <TaskList title="⏳ Esperando respuesta del cliente" items={enviados} empty="Nada pendiente de respuesta." render={qt=>{const t=computeQuote(qt,data.catalog);
+      return <Row key={qt.id} onClick={()=>go("quote",qt.id)}><div style={iconBox(C.amber)}><I.clock size={18} color={C.amber}/></div>
+        <div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,color:C.ink,fontSize:14}}>Nº {qt.number} · {clientName(qt.clientId)}</div>
+          <div style={{fontSize:12.5,color:C.muted}}>{qt.date} · {eur(t.total)}</div></div><Badge map={QUOTE_STATUS} value={qt.status}/></Row>;}}/>
+
+    {facturasPend.length>0 && <TaskList title="💶 Facturas por cobrar" items={facturasPend} empty="" render={f=>{const t=computeQuote(f,data.catalog);
+      return <Row key={f.id} onClick={()=>go("invoice",f.id)}><div style={iconBox(C.clay)}><I.receipt size={18} color={C.clay}/></div>
+        <div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,color:C.ink,fontSize:14}}>Factura {f.number} · {clientName(f.clientId)}</div>
+          <div style={{fontSize:12.5,color:C.muted}}>{eur(t.total)}</div></div><Badge map={INVOICE_STATUS} value={f.status}/></Row>;}}/>}
+
+    {porEnviar.length>0 && <TaskList title="✏️ Borradores sin enviar" items={porEnviar} empty="" render={qt=>{const t=computeQuote(qt,data.catalog);
+      return <Row key={qt.id} onClick={()=>go("quote",qt.id)}><div style={iconBox(C.muted)}><I.file size={18} color={C.muted}/></div>
+        <div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,color:C.ink,fontSize:14}}>Nº {qt.number} · {clientName(qt.clientId)}</div>
+          <div style={{fontSize:12.5,color:C.muted}}>{eur(t.total)}</div></div><I.fwd size={18} color={C.muted}/></Row>;}}/>}
+
+    <Section title="Clientes recientes" action={<button onClick={()=>go("clients")} style={lnk}>Ver todos</button>}/>
+    {data.clients.slice(0,4).map(cl=><Row key={cl.id} onClick={()=>go("client",cl.id)}>
       <Avatar name={cl.name}/><div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,color:C.ink,fontSize:14.5}}>{cl.name}</div>
-      <div style={{fontSize:12.5,color:C.muted}}>{cl.type} · {cl.phone}</div></div><Badge map={STATUS} value={cl.status}/></Row>)}
+      <div style={{fontSize:12.5,color:C.muted}}>{cl.type} · {cl.phone}</div></div><I.fwd size={18} color={C.muted}/></Row>)}
   </div>;
 }
 
@@ -499,11 +618,13 @@ function ClientScreen({data,id,go,update}){
   const cl=data.clients.find(c=>c.id===id);
   const projs=data.projects.filter(p=>p.clientId===id);
   const quotes=data.quotes.filter(q=>q.clientId===id);
+  const invoices=(data.invoices||[]).filter(f=>f.clientId===id);
   if(!cl) return null;
   const cBtn=(icon,label,color,href)=><a href={href} style={{flex:1,textAlign:"center",textDecoration:"none"}}>
     <div style={{width:46,height:46,borderRadius:14,background:color+"18",display:"grid",placeItems:"center",margin:"0 auto 6px"}}>{icon}</div>
     <div style={{fontSize:11.5,color:C.muted}}>{label}</div></a>;
   const tel=(cl.phone||"").replace(/\s/g,"");
+  const totalFacturado=invoices.filter(f=>f.status!=="anulada").reduce((s,f)=>s+computeQuote(f,data.catalog).total,0);
   return <div>
     <Header title="Ficha de cliente" onBack={()=>go("clients")} right={<button onClick={()=>{if(confirm("¿Eliminar cliente?")){update(d=>({...d,clients:d.clients.filter(x=>x.id!==id)}));go("clients");}}} style={{background:"none",border:"none",cursor:"pointer",color:C.clayDk}}><I.trash size={20}/></button>}/>
     <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:18,padding:18,textAlign:"center"}}>
@@ -516,6 +637,13 @@ function ClientScreen({data,id,go,update}){
         {cBtn(<I.chat size={20} color={C.clay}/>,"WhatsApp",C.clay,`https://wa.me/${tel.replace(/^0/,"34")}`)}
         {cBtn(<I.mail size={20} color={C.steel}/>,"Email",C.steel,`mailto:${cl.email}`)}</div>
     </div>
+    {/* Acción rápida: presupuesto para este cliente */}
+    <button onClick={()=>go("newQuote",{clientId:id})} style={{width:"100%",marginTop:12,background:C.clay,color:"#fff",border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:15,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:9}}><I.file size={18} color="#fff"/> Nuevo presupuesto para {cl.name.split(" ")[0]}</button>
+    {/* Resumen económico */}
+    <div style={{display:"flex",gap:10,marginTop:12}}>
+      <div style={{flex:1,background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"11px 14px"}}><div style={{fontSize:11.5,color:C.muted}}>Presupuestos</div><div style={{fontSize:18,fontWeight:700,color:C.ink,fontFamily:"Fraunces,serif"}}>{quotes.length}</div></div>
+      <div style={{flex:1,background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"11px 14px"}}><div style={{fontSize:11.5,color:C.muted}}>Facturado</div><div style={{fontSize:18,fontWeight:700,color:C.sage,fontFamily:"Fraunces,serif"}}>{eur(totalFacturado)}</div></div>
+    </div>
     <div style={infoCard}><InfoLine label="Teléfono" value={cl.phone}/><InfoLine label="Email" value={cl.email}/>
       <InfoLine label="Dirección fiscal" value={cl.fiscal}/><InfoLine label="Notas" value={cl.notes||"—"} last/></div>
     <Section title={`Obras (${projs.length})`} action={<button onClick={()=>go("newProject",id)} style={lnk}>+ Añadir</button>}/>
@@ -523,10 +651,17 @@ function ClientScreen({data,id,go,update}){
       <div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,color:C.ink,fontSize:14}}>{p.name}</div>
       <div style={{fontSize:12.5,color:C.muted}}>{p.type} · {p.measures}</div></div><I.fwd size={18} color={C.muted}/></Row>)}
     {projs.length===0&&<div style={empty}>Sin obras todavía.</div>}
-    <Section title={`Presupuestos (${quotes.length})`}/>
+    <Section title={`Presupuestos (${quotes.length})`} action={<button onClick={()=>go("newQuote",{clientId:id})} style={lnk}>+ Nuevo</button>}/>
     {quotes.map(qt=>{const t=computeQuote(qt,data.catalog);return <Row key={qt.id} onClick={()=>go("quote",qt.id)}>
       <div style={{flex:1}}><div style={{fontWeight:600,color:C.ink,fontSize:14}}>Nº {qt.number}</div>
       <div style={{fontSize:12.5,color:C.muted}}>{qt.date} · {eur(t.total)}</div></div><Badge map={QUOTE_STATUS} value={qt.status}/></Row>;})}
+    {quotes.length===0&&<div style={empty}>Sin presupuestos todavía.</div>}
+    <Section title={`Facturas (${invoices.length})`}/>
+    {invoices.map(f=>{const t=computeQuote(f,data.catalog);return <Row key={f.id} onClick={()=>go("invoice",f.id)}>
+      <div style={iconBox(C.steel)}><I.receipt size={18} color={C.steel}/></div>
+      <div style={{flex:1}}><div style={{fontWeight:600,color:C.ink,fontSize:14}}>Factura {f.number}</div>
+      <div style={{fontSize:12.5,color:C.muted}}>{f.date} · {eur(t.total)}</div></div><Badge map={INVOICE_STATUS} value={f.status}/></Row>;})}
+    {invoices.length===0&&<div style={empty}>Sin facturas todavía.</div>}
   </div>;
 }
 
@@ -758,10 +893,89 @@ function QuoteScreen({data,id,go,update}){
       <InfoLine label="Condiciones de pago" value={qt.conditions||("Transferencia "+(data.company.iban||""))}/>
       <InfoLine label="Observaciones" value={qt.observations||"—"} last/>
     </div>
+    {(()=>{ const existing=(data.invoices||[]).find(f=>f.fromQuote===id);
+      if(existing) return <div onClick={()=>go("invoice",existing.id)} style={{marginTop:16,background:C.sage+"18",border:`1px solid ${C.sage}`,borderRadius:14,padding:"13px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+        <I.receipt size={20} color={C.sage}/><div style={{flex:1}}><div style={{fontWeight:700,color:C.ink,fontSize:14}}>Factura {existing.number} generada</div><div style={{fontSize:12,color:C.muted}}>Toca para verla</div></div><I.fwd size={18} color={C.muted}/></div>;
+      if(qt.status==="aceptado") return <button onClick={()=>{
+        const inv={id:uid("inv"),number:String(data.company.nextInvoice||1),clientId:qt.clientId,projectId:qt.projectId,
+          fromQuote:id,date:new Date().toISOString().slice(0,10),status:"pendiente",discount:qt.discount,lines:qt.lines};
+        update(d=>({...d,invoices:[inv,...(d.invoices||[])],company:{...d.company,nextInvoice:(+d.company.nextInvoice||1)+1}}));
+        go("invoice",inv.id);
+      }} style={{...big,width:"100%",marginTop:16,background:C.clay,color:"#fff"}}><I.receipt size={17} color="#fff"/> Convertir en factura</button>;
+      return <div style={{marginTop:16,fontSize:12.5,color:C.muted,textAlign:"center"}}>Marca el presupuesto como <b>Aceptado</b> para poder facturarlo.</div>;
+    })()}
+    <div style={{display:"flex",gap:10,marginTop:12}}>
+      <button disabled={busy} onClick={()=>makePDF("save")} style={{...big,background:C.ink,color:C.paper,opacity:busy?.6:1}}><I.pdf size={16} color={C.paper}/> {busy?"…":"Descargar PDF"}</button>
+      <button disabled={busy} onClick={()=>makePDF("share")} style={{...big,background:C.sage,color:"#fff",opacity:busy?.6:1}}><I.chat size={16} color="#fff"/> Enviar</button>
+    </div>
+  </div>;
+}
+
+function InvoicesScreen({data,go}){
+  const invoices=data.invoices||[];
+  const clientName=(id)=>data.clients.find(c=>c.id===id)?.name||"—";
+  const pend=invoices.filter(f=>f.status==="pendiente"||f.status==="vencida");
+  const cobrar=pend.reduce((s,f)=>s+computeQuote(f,data.catalog).total,0);
+  const cobrado=invoices.filter(f=>f.status==="pagada").reduce((s,f)=>s+computeQuote(f,data.catalog).total,0);
+  return <div>
+    <div style={{padding:"20px 4px 4px"}}><h1 style={{fontFamily:"Fraunces,serif",fontSize:24,fontWeight:600,color:C.ink,margin:0}}>Facturas</h1></div>
+    <div style={{display:"flex",gap:10,marginTop:14}}>
+      <div style={{flex:1,background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"12px 14px"}}><div style={{fontSize:11.5,color:C.muted}}>Por cobrar</div><div style={{fontSize:18,fontWeight:700,color:C.clay,fontFamily:"Fraunces,serif"}}>{eur(cobrar)}</div></div>
+      <div style={{flex:1,background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"12px 14px"}}><div style={{fontSize:11.5,color:C.muted}}>Cobrado</div><div style={{fontSize:18,fontWeight:700,color:C.sage,fontFamily:"Fraunces,serif"}}>{eur(cobrado)}</div></div>
+    </div>
+    <Section title="Todas las facturas"/>
+    {invoices.length===0&&<div style={empty}>Aún no hay facturas.<br/>Genéralas desde un presupuesto aceptado.</div>}
+    {invoices.map(f=>{const t=computeQuote(f,data.catalog);return <Row key={f.id} onClick={()=>go("invoice",f.id)}>
+      <div style={iconBox(C.steel)}><I.receipt size={18} color={C.steel}/></div>
+      <div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,color:C.ink,fontSize:14}}>Factura {f.number} · {clientName(f.clientId)}</div>
+      <div style={{fontSize:12.5,color:C.muted}}>{f.date} · {eur(t.total)}</div></div><Badge map={INVOICE_STATUS} value={f.status}/></Row>;})}
+  </div>;
+}
+
+function InvoiceScreen({data,id,go,update}){
+  const inv=(data.invoices||[]).find(x=>x.id===id);
+  const cl=data.clients.find(c=>c.id===inv?.clientId);
+  const [busy,setBusy]=useState(false);
+  if(!inv) return null;
+  const t=computeQuote(inv,data.catalog);
+  const setStatus=(s)=>update(d=>({...d,invoices:d.invoices.map(x=>x.id===id?{...x,status:s}:x)}));
+  const makePDF=(action)=>{
+    setBusy(true);
+    try{
+      const doc=generateInvoicePDF(inv,cl,data.company,data.catalog);
+      const fname=`Factura_${inv.number}_${(cl?.name||"cliente").replace(/\s/g,"_")}.pdf`;
+      if(action==="share"&&navigator.canShare){
+        const blob=doc.output("blob"); const file=new File([blob],fname,{type:"application/pdf"});
+        if(navigator.canShare({files:[file]})){ navigator.share({files:[file],title:"Factura "+inv.number}).catch(()=>{}); setBusy(false); return; }
+      }
+      doc.save(fname);
+    }catch(e){ alert("Error al generar PDF: "+e.message); }
+    setBusy(false);
+  };
+  return <div>
+    <Header title={`Factura ${inv.number}`} onBack={()=>go("invoices")} right={<button onClick={()=>{if(confirm("¿Eliminar factura?")){update(d=>({...d,invoices:d.invoices.filter(x=>x.id!==id)}));go("invoices");}}} style={{background:"none",border:"none",cursor:"pointer",color:C.clayDk}}><I.trash size={20}/></button>}/>
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:18,padding:18}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+        <div><div style={{fontSize:11.5,color:C.muted}}>Cliente</div><div onClick={()=>go("client",cl?.id)} style={{fontWeight:600,color:C.ink,fontSize:15,cursor:"pointer"}}>{cl?.name}</div>
+        <div style={{fontSize:12.5,color:C.muted,marginTop:2}}>{cl?.nif}</div></div><Badge map={INVOICE_STATUS} value={inv.status}/></div>
+      <div style={{fontSize:12.5,color:C.muted,marginTop:14}}>Fecha: <b style={{color:C.ink}}>{inv.date}</b>{inv.fromQuote&&<span> · desde presup.</span>}</div>
+    </div>
+    <Section title="Partidas"/>
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"4px 14px"}}>
+      {t.detail.map((d,i)=><div key={d.itemId} style={{padding:"11px 0",borderBottom:i===t.detail.length-1?"none":`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
+        <div style={{flex:1,minWidth:0}}><div style={{fontSize:13.5,color:C.ink,fontWeight:500}}>{d.item?.name}{d.item?.hasQuality&&d.quality?<span style={{color:C.sage}}> · {qLabel(d.quality)}</span>:null}</div><div style={{fontSize:12,color:C.muted}}>{d.qty} {d.item?.unit} × {eur(d.unit)}</div></div>
+        <div style={{fontWeight:600,color:C.ink,fontSize:13.5}}>{eur(d.lineBase)}</div></div>)}</div>
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"6px 14px",marginTop:12}}>
+      <Tline k="Base imponible" v={eur(t.baseAfter)}/><Tline k="IVA (21%)" v={eur(t.ivaTotal)}/>
+      <div style={{display:"flex",justifyContent:"space-between",padding:"12px 0 8px",borderTop:`1px solid ${C.line}`,marginTop:4}}>
+        <span style={{fontWeight:700,color:C.ink}}>Total</span><span style={{fontWeight:700,color:C.clay,fontSize:20,fontFamily:"Fraunces,serif"}}>{eur(t.total)}</span></div></div>
+    <Section title="Estado de cobro"/>
+    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{Object.keys(INVOICE_STATUS).map(s=><Chip key={s} active={inv.status===s} onClick={()=>setStatus(s)}>{INVOICE_STATUS[s].label}</Chip>)}</div>
     <div style={{display:"flex",gap:10,marginTop:16}}>
       <button disabled={busy} onClick={()=>makePDF("save")} style={{...big,background:C.ink,color:C.paper,opacity:busy?.6:1}}><I.pdf size={16} color={C.paper}/> {busy?"…":"Descargar PDF"}</button>
       <button disabled={busy} onClick={()=>makePDF("share")} style={{...big,background:C.sage,color:"#fff",opacity:busy?.6:1}}><I.chat size={16} color="#fff"/> Enviar</button>
     </div>
+    <div style={{fontSize:11,color:C.muted,marginTop:14,textAlign:"center"}}>Documento de factura. Para validez fiscal completa (VERI*FACTU) consulta con tu asesoría.</div>
   </div>;
 }
 
@@ -892,9 +1106,8 @@ function SettingsScreen({data,update}){
 const TABS=[
   {key:"home",label:"Inicio",icon:I.home},
   {key:"clients",label:"Clientes",icon:I.users},
-  {key:"projects",label:"Obras",icon:I.hard},
   {key:"quotes",label:"Presup.",icon:I.file},
-  {key:"ai",label:"IA",icon:I.cam},
+  {key:"invoices",label:"Facturas",icon:I.receipt},
   {key:"settings",label:"Ajustes",icon:I.cog},
 ];
 
@@ -916,7 +1129,7 @@ function App(){
 
   if(locked) return <PinGate pin={data.settings.pin} onOk={()=>setUnlocked(true)}/>;
 
-  const activeTab=({client:"clients",newClient:"clients",project:"projects",newProject:"projects",quote:"quotes",newQuote:"quotes",editDoc:"quotes",catalog:"quotes"})[screen]||screen;
+  const activeTab=({client:"clients",newClient:"clients",project:"projects",newProject:"projects",quote:"quotes",newQuote:"quotes",editDoc:"quotes",catalog:"quotes",invoice:"invoices"})[screen]||screen;
   const render=()=>{
     switch(screen){
       case "home": return <HomeScreen data={data} go={go}/>;
@@ -931,6 +1144,8 @@ function App(){
       case "quote": return <QuoteScreen data={data} id={param} go={go} update={update}/>;
       case "editDoc": return <EditDocScreen data={data} id={param} go={go} update={update}/>;
       case "catalog": return <CatalogScreen data={data} go={go} update={update}/>;
+      case "invoices": return <InvoicesScreen data={data} go={go}/>;
+      case "invoice": return <InvoiceScreen data={data} id={param} go={go} update={update}/>;
       case "ai": return <AIScreen data={data}/>;
       case "settings": return <SettingsScreen data={data} update={update}/>;
       default: return <HomeScreen data={data} go={go}/>;
@@ -957,7 +1172,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    const swCode = "const CACHE='mmr-v3';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
+    const swCode = "const CACHE='mmr-v4';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
     const blob = new Blob([swCode], { type: 'application/javascript' });
     navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
   });
