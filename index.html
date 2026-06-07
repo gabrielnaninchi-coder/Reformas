@@ -113,7 +113,7 @@ const SEED = {
     {id:"q1",number:"203",clientId:"cl1",projectId:"pr1",date:"2025-09-22",validity:30,status:"aceptado",discount:0,
       lines:[{itemId:"c1",qty:2},{itemId:"c2",qty:1},{itemId:"c3",qty:1},{itemId:"c4",qty:1},{itemId:"c6",qty:1}]},
   ],
-  settings: { apiKey:"", pin:"", pinEnabled:false },
+  settings: { apiKey:"", pin:"", pinEnabled:false, aiQuality:"high" },
 };
 
 /* ---------- Persistencia ---------- */
@@ -200,6 +200,15 @@ function generateQuotePDF(quote, client, project, company, catalog){
   });
   y += 3;
 
+  // Descripción del trabajo (editable, opcional)
+  if(quote.projDesc && quote.projDesc.trim()){
+    doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.text("Descripción del trabajo:", M+1, y);
+    doc.setFont("helvetica","normal");
+    const dl = doc.splitTextToSize(quote.projDesc, W-2*M-2);
+    doc.text(dl, M+1, y+5);
+    y += 5 + dl.length*4 + 3;
+  }
+
   // Tabla de partidas
   const cDesc=M+1, cPrice=W-M-58, cQty=W-M-38, cTot=W-M-2;
   doc.setFillColor(17,17,17); doc.rect(M,y,W-2*M,7,"F");
@@ -238,12 +247,25 @@ function generateQuotePDF(quote, client, project, company, catalog){
   drawTotal("TOTAL", eur(t.total), true);
   y += 6;
 
-  // Condiciones de pago
+  // Condiciones de pago (editable)
   doc.setFont("helvetica","bold"); doc.setFontSize(8.5);
   doc.text("Condiciones de pago:", M, y);
   doc.setFont("helvetica","italic");
-  doc.text(" mediante transferencia bancaria "+(company.iban||""), M+34, y, {maxWidth:W-2*M-34});
-  y += 18;
+  const cond = quote.conditions || ("mediante transferencia bancaria "+(company.iban||""));
+  const condLines = doc.splitTextToSize(" "+cond, W-2*M-34);
+  doc.text(condLines, M+34, y);
+  y += Math.max(6, condLines.length*4) + 4;
+
+  // Observaciones (editable, opcional)
+  if(quote.observations && quote.observations.trim()){
+    doc.setFont("helvetica","bold"); doc.setFontSize(8.5);
+    doc.text("Observaciones:", M, y);
+    doc.setFont("helvetica","normal");
+    const obsLines = doc.splitTextToSize(quote.observations, W-2*M);
+    doc.text(obsLines, M, y+5);
+    y += 5 + obsLines.length*4 + 4;
+  }
+  y += 6;
 
   // Firma
   doc.setDrawColor(180,180,180); doc.line(W/2-30,y,W/2+30,y);
@@ -262,11 +284,14 @@ function generateQuotePDF(quote, client, project, company, catalog){
 /* ============================================================
    LLAMADA A OPENAI — generación de imagen
    ============================================================ */
-async function generateAIImage(apiKey, prompt){
+async function generateAIImage(apiKey, prompt, quality){
+  const body = { model:"gpt-image-2", prompt, n:1, size:"1024x1024" };
+  // gpt-image-2 admite calidad: "low" | "medium" | "high"
+  if(quality) body.quality = quality;
   const res = await fetch("https://api.openai.com/v1/images/generations",{
     method:"POST",
     headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+apiKey },
-    body: JSON.stringify({ model:"gpt-image-1", prompt, n:1, size:"1024x1024" }),
+    body: JSON.stringify(body),
   });
   if(!res.ok){
     let msg = "Error "+res.status;
@@ -569,10 +594,39 @@ function QuoteScreen({data,id,go,update}){
         <span style={{fontWeight:700,color:C.ink}}>Total</span><span style={{fontWeight:700,color:C.clay,fontSize:20,fontFamily:"Fraunces,serif"}}>{eur(t.total)}</span></div></div>
     <Section title="Estado"/>
     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{Object.keys(QUOTE_STATUS).map(s=><Chip key={s} active={qt.status===s} onClick={()=>setStatus(s)}>{QUOTE_STATUS[s].label}</Chip>)}</div>
+    <Section title="Texto del documento" action={<button onClick={()=>go("editDoc",id)} style={lnk}>Editar</button>}/>
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"4px 14px"}}>
+      <InfoLine label="Descripción del trabajo" value={qt.projDesc||"(sin texto · usa el predeterminado)"}/>
+      <InfoLine label="Condiciones de pago" value={qt.conditions||("Transferencia "+(data.company.iban||""))}/>
+      <InfoLine label="Observaciones" value={qt.observations||"—"} last/>
+    </div>
     <div style={{display:"flex",gap:10,marginTop:16}}>
       <button disabled={busy} onClick={()=>makePDF("save")} style={{...big,background:C.ink,color:C.paper,opacity:busy?.6:1}}><I.pdf size={16} color={C.paper}/> {busy?"…":"Descargar PDF"}</button>
       <button disabled={busy} onClick={()=>makePDF("share")} style={{...big,background:C.sage,color:"#fff",opacity:busy?.6:1}}><I.chat size={16} color="#fff"/> Enviar</button>
     </div>
+  </div>;
+}
+
+function EditDocScreen({data,id,go,update}){
+  const qt=data.quotes.find(x=>x.id===id);
+  const pr=data.projects.find(p=>p.id===qt?.projectId);
+  const [projDesc,setProjDesc]=useState(qt?.projDesc ?? (pr?.desc||""));
+  const [conditions,setConditions]=useState(qt?.conditions ?? ("mediante transferencia bancaria "+(data.company.iban||"")));
+  const [observations,setObservations]=useState(qt?.observations ?? "");
+  if(!qt) return null;
+  const save=()=>{ update(d=>({...d,quotes:d.quotes.map(x=>x.id===id?{...x,projDesc,conditions,observations}:x)})); go("quote",id); };
+  const ta={...inp,resize:"vertical",lineHeight:1.5,minHeight:80};
+  return <div>
+    <Header title="Editar documento" onBack={()=>go("quote",id)}/>
+    <div style={{display:"flex",gap:8,padding:12,background:C.steel+"10",borderRadius:12,marginTop:6}}>
+      <I.file size={20} color={C.steel}/><div style={{fontSize:12,color:C.steel,lineHeight:1.4}}>Edita los textos libres del presupuesto. Aparecerán tal cual en el PDF. Las partidas y precios se editan en el propio presupuesto.</div></div>
+    <Section title="Descripción del trabajo"/>
+    <textarea value={projDesc} onChange={e=>setProjDesc(e.target.value)} rows={4} style={ta} placeholder="Detalle del trabajo a realizar, materiales, acabados…"/>
+    <Section title="Condiciones de pago"/>
+    <textarea value={conditions} onChange={e=>setConditions(e.target.value)} rows={2} style={ta}/>
+    <Section title="Observaciones"/>
+    <textarea value={observations} onChange={e=>setObservations(e.target.value)} rows={3} style={ta} placeholder="Plazos, validez, notas comerciales, disclaimer IA…"/>
+    <button onClick={save} style={{...big,background:C.clay,color:"#fff",width:"100%",marginTop:16}}>Guardar texto</button>
   </div>;
 }
 
@@ -588,7 +642,7 @@ function AIScreen({data}){
     if(!data.settings.apiKey){ setErr("Falta la clave API. Ve a Ajustes y añádela."); return; }
     setLoading(true);
     const prompt=`Fotografía realista de un/a ${type.toLowerCase()} reformado, estilo ${style.toLowerCase()}. ${desc}. Render fotorrealista de interiorismo, iluminación natural, alta calidad, sin texto ni personas.`;
-    try{ const img=await generateAIImage(data.settings.apiKey,prompt); setResult(img); }
+    try{ const img=await generateAIImage(data.settings.apiKey,prompt,data.settings.aiQuality||"high"); setResult(img); }
     catch(e){ setErr(e.message); }
     setLoading(false);
   };
@@ -631,9 +685,10 @@ function SettingsScreen({data,update}){
   const [key,setKey]=useState(data.settings.apiKey);
   const [pin,setPin]=useState(data.settings.pin);
   const [pinOn,setPinOn]=useState(data.settings.pinEnabled);
+  const [quality,setQuality]=useState(data.settings.aiQuality||"high");
   const [showKey,setShowKey]=useState(false);
   const setF=(k)=>(e)=>setC({...c,[k]:e.target.value});
-  const save=()=>{ update(d=>({...d,company:c,settings:{...d.settings,apiKey:key,pin:pin.slice(0,6),pinEnabled:pinOn&&pin.length>=4}})); alert("Ajustes guardados."); };
+  const save=()=>{ update(d=>({...d,company:c,settings:{...d.settings,apiKey:key,aiQuality:quality,pin:pin.slice(0,6),pinEnabled:pinOn&&pin.length>=4}})); alert("Ajustes guardados."); };
   return <div>
     <Header title="Ajustes"/>
     <Section title="Datos de empresa (PDF)"/>
@@ -653,7 +708,12 @@ function SettingsScreen({data,update}){
           <input type={showKey?"text":"password"} value={key} onChange={e=>setKey(e.target.value)} placeholder="sk-..." style={{...inp,flex:1}}/>
           <button onClick={()=>setShowKey(!showKey)} style={{...inp,width:54,cursor:"pointer",fontSize:12}}>{showKey?"Ocultar":"Ver"}</button>
         </div></label>
-      <div style={{fontSize:11,color:C.muted,marginTop:8,lineHeight:1.5}}>Se guarda solo en este móvil. La app llama a OpenAI directamente con tu clave. Configura un límite de gasto en tu panel de OpenAI.</div>
+      <div style={{fontSize:11,color:C.muted,marginTop:8,lineHeight:1.5}}>Modelo <b>gpt-image-2</b> (ChatGPT Images 2.0). Se guarda solo en este móvil. La app llama a OpenAI directamente con tu clave. Configura un límite de gasto en tu panel de OpenAI.</div>
+      <label style={{display:"block",marginTop:12}}><div style={{fontSize:12,color:C.muted,marginBottom:5,fontWeight:600}}>Calidad de imagen</div>
+        <div style={{display:"flex",gap:8}}>
+          {[["low","Rápida"],["medium","Media"],["high","Alta (pro)"]].map(([v,l])=><Chip key={v} active={quality===v} onClick={()=>setQuality(v)}>{l}</Chip>)}
+        </div></label>
+      <div style={{fontSize:11,color:C.muted,marginTop:6}}>Mayor calidad = mejor resultado pero más coste y algo más lenta.</div>
     </div>
     <Section title="Seguridad"/>
     <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:16,padding:16}}>
@@ -698,7 +758,7 @@ function App(){
 
   if(locked) return <PinGate pin={data.settings.pin} onOk={()=>setUnlocked(true)}/>;
 
-  const activeTab=({client:"clients",newClient:"clients",project:"projects",newProject:"projects",quote:"quotes",newQuote:"quotes"})[screen]||screen;
+  const activeTab=({client:"clients",newClient:"clients",project:"projects",newProject:"projects",quote:"quotes",newQuote:"quotes",editDoc:"quotes"})[screen]||screen;
   const render=()=>{
     switch(screen){
       case "home": return <HomeScreen data={data} go={go}/>;
@@ -711,6 +771,7 @@ function App(){
       case "quotes": return <QuotesScreen data={data} go={go}/>;
       case "newQuote": return <NewQuoteScreen data={data} go={go} addQuote={addQuote} pre={param}/>;
       case "quote": return <QuoteScreen data={data} id={param} go={go} update={update}/>;
+      case "editDoc": return <EditDocScreen data={data} id={param} go={go} update={update}/>;
       case "ai": return <AIScreen data={data}/>;
       case "settings": return <SettingsScreen data={data} update={update}/>;
       default: return <HomeScreen data={data} go={go}/>;
@@ -733,12 +794,11 @@ const iconBox=(c)=>({width:42,height:42,borderRadius:12,background:c+"14",displa
 const empty={textAlign:"center",color:C.muted,fontSize:13,padding:"30px 0"};
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
-
 </script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    const swCode = "const CACHE='mmr-v1';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
+    const swCode = "const CACHE='mmr-v2';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
     const blob = new Blob([swCode], { type: 'application/javascript' });
     navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
   });
