@@ -271,6 +271,19 @@ function SimImg({simId,style,fallback}){
   if(!src) return fallback||<div style={{...style,display:"grid",placeItems:"center",background:C.line,color:C.muted}}><I.img size={20}/></div>;
   return <img src={src} style={style}/>;
 }
+/* Antes/Después en miniatura (si hay 'antes') */
+function SimPair({sim,height=120}){
+  const after=useSimImage(sim.id);
+  const before=useSimImage(sim.hasBefore?sim.id+"_before":null);
+  const cell={flex:1,height,objectFit:"cover",display:"block",width:"100%"};
+  if(before) return <div style={{display:"flex",gap:4,borderRadius:10,overflow:"hidden",border:`1px solid ${C.line}`}}>
+    <div style={{flex:1,position:"relative"}}>{after?null:null}<img src={before} style={cell}/><span style={tagS}>Antes</span></div>
+    <div style={{flex:1,position:"relative"}}>{after&&<img src={after} style={cell}/>}<span style={{...tagS,background:C.clay}}>Después</span></div>
+  </div>;
+  return <div style={{borderRadius:10,overflow:"hidden",border:`1px solid ${C.line}`}}>{after&&<img src={after} style={{width:"100%",height,objectFit:"cover",display:"block"}}/>}</div>;
+}
+const tagS={position:"absolute",bottom:4,left:4,background:"#000a",color:"#fff",fontSize:9.5,fontWeight:600,padding:"2px 6px",borderRadius:6};
+
 
 
 /* ---------- Utilidades ---------- */
@@ -296,7 +309,7 @@ function computeQuote(quote,catalog){
 /* ============================================================
    GENERACIÓN DE PDF (jsPDF) — formato MMR
    ============================================================ */
-function generateQuotePDF(quote, client, project, company, catalog, simImages){
+function generateQuotePDF(quote, client, project, company, catalog, simPairs){
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({unit:"mm",format:"a4"});
   const W = 210, M = 14;
@@ -436,25 +449,39 @@ function generateQuotePDF(quote, client, project, company, catalog, simImages){
     doc.text("Imagen de simulación generada por IA con carácter orientativo. No sustituye plano técnico ni medición.", M, y, {maxWidth:W-2*M});
   }
 
-  // Página de simulaciones IA (si las hay)
-  if(simImages && simImages.length){
+  // Página de simulaciones IA (antes / después)
+  if(simPairs && simPairs.length){
     doc.addPage();
     let yy=M;
     doc.setFillColor(17,17,17); doc.rect(M,yy,W-2*M,12,"F");
     doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(11);
-    doc.text("Simulación de la reforma", M+4, yy+8); yy+=20;
-    const imgW=W-2*M;
-    simImages.slice(0,3).forEach((src)=>{
-      try{
-        const props=doc.getImageProperties(src);
-        const ratio=props.height/props.width;
-        let h=imgW*ratio; if(h>110) h=110;
-        if(yy+h>278){ doc.addPage(); yy=M; }
-        doc.addImage(src,"JPEG",M,yy,imgW,h);
-        yy+=h+8;
-      }catch(e){}
+    doc.text("Simulación de la reforma", M+4, yy+8); yy+=18;
+    const gap=6, colW=(W-2*M-gap)/2, cellH=colW*0.75; // proporción 4:3
+    simPairs.slice(0,3).forEach((pair)=>{
+      const blockH=cellH+12;
+      if(yy+blockH>282){ doc.addPage(); yy=M; }
+      if(pair.before){
+        // Dos columnas: ANTES | DESPUÉS
+        doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.setTextColor(120,120,120);
+        doc.text("ANTES", M, yy+4);
+        doc.text("DESPUÉS", M+colW+gap, yy+4);
+        try{ doc.addImage(pair.before,"JPEG",M,yy+6,colW,cellH); }catch(e){}
+        try{ doc.addImage(pair.after,"JPEG",M+colW+gap,yy+6,colW,cellH); }catch(e){}
+        // marco al "después" para destacarlo
+        doc.setDrawColor(200,90,50); doc.setLineWidth(0.6); doc.rect(M+colW+gap,yy+6,colW,cellH);
+        doc.setDrawColor(210,210,210); doc.setLineWidth(0.3); doc.rect(M,yy+6,colW,cellH);
+        yy+=cellH+16;
+      }else{
+        // Solo resultado, a ancho completo razonable
+        doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.setTextColor(120,120,120);
+        doc.text("SIMULACIÓN", M, yy+4);
+        const fullH=Math.min(110,(W-2*M)*0.66);
+        try{ doc.addImage(pair.after,"JPEG",M,yy+6,W-2*M,fullH); }catch(e){}
+        doc.setDrawColor(200,90,50); doc.setLineWidth(0.6); doc.rect(M,yy+6,W-2*M,fullH);
+        yy+=fullH+16;
+      }
     });
-    doc.setTextColor(150,120,40); doc.setFontSize(7.5);
+    doc.setTextColor(150,120,40); doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
     doc.text("Imágenes de simulación generadas por IA con carácter orientativo. No sustituyen plano técnico, medición ni memoria de calidades.", M, 290, {maxWidth:W-2*M});
   }
 
@@ -828,12 +855,14 @@ function ClientScreen({data,id,go,update}){
     {invoices.length===0&&<div style={empty}>Sin facturas todavía.</div>}
     <Section title={`Simulaciones IA (${sims.length})`} action={<button onClick={()=>go("ai",{clientId:id})} style={lnk}>+ Crear</button>}/>
     {sims.length===0&&<div style={empty}>Sin simulaciones. Pulsa “+ Crear” para generar una con foto e IA.</div>}
-    {sims.length>0&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-      {sims.map(s=><div key={s.id} style={{borderRadius:12,overflow:"hidden",border:`1px solid ${C.line}`,position:"relative"}}>
-        <SimImg simId={s.id} style={{width:"100%",aspectRatio:"1",objectFit:"cover",display:"block"}}/>
-        <div style={{padding:"7px 9px"}}><div style={{fontSize:12,fontWeight:600,color:C.ink}}>{s.type} · {s.style}</div><div style={{fontSize:10.5,color:C.muted}}>{s.date}</div></div>
-        <button onClick={async()=>{ if(confirm("¿Eliminar esta simulación?")){ await idbDel(s.id); update(d=>({...d,sims:d.sims.filter(x=>x.id!==s.id)})); } }}
-          style={{position:"absolute",top:6,right:6,background:"#000a",border:"none",borderRadius:8,width:30,height:30,display:"grid",placeItems:"center",cursor:"pointer"}}><I.trash size={15} color="#fff"/></button>
+    {sims.length>0&&<div style={{display:"flex",flexDirection:"column",gap:12}}>
+      {sims.map(s=><div key={s.id} style={{borderRadius:12,overflow:"hidden",border:`1px solid ${C.line}`,position:"relative",background:C.card}}>
+        <SimPair sim={s} height={130}/>
+        <div style={{padding:"8px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div><div style={{fontSize:12.5,fontWeight:600,color:C.ink}}>{s.type} · {s.style}</div><div style={{fontSize:10.5,color:C.muted}}>{s.date}{s.hasBefore?" · antes/después":""}</div></div>
+          <button onClick={async()=>{ if(confirm("¿Eliminar esta simulación?")){ await idbDel(s.id); if(s.hasBefore){try{await idbDel(s.id+"_before");}catch(e){}} update(d=>({...d,sims:d.sims.filter(x=>x.id!==s.id)})); } }}
+            style={{background:"none",border:"none",cursor:"pointer",color:C.clayDk}}><I.trash size={17}/></button>
+        </div>
       </div>)}
     </div>}
   </div>;
@@ -1042,13 +1071,19 @@ function QuoteScreen({data,id,go,update}){
   const makePDF=async(action)=>{
     setBusy(true);
     try{
-      let simImages=[];
+      let simPairs=[];
       if(qt.simIds && qt.simIds.length){
         for(const sid of qt.simIds.slice(0,3)){
-          try{ const d=await idbGet(sid); if(d) simImages.push(d); }catch(e){}
+          try{
+            const after=await idbGet(sid);
+            let before=null;
+            const meta=(data.sims||[]).find(s=>s.id===sid);
+            if(meta&&meta.hasBefore){ try{ before=await idbGet(sid+"_before"); }catch(e){} }
+            if(after) simPairs.push({after,before});
+          }catch(e){}
         }
       }
-      const doc=generateQuotePDF(qt,cl,pr,data.company,data.catalog,simImages);
+      const doc=generateQuotePDF(qt,cl,pr,data.company,data.catalog,simPairs);
       const fname=`Presupuesto_${qt.number}_${(cl?.name||"cliente").replace(/\s/g,"_")}.pdf`;
       if(action==="share"&&navigator.canShare){
         const blob=doc.output("blob");
@@ -1080,7 +1115,7 @@ function QuoteScreen({data,id,go,update}){
     <Section title="Estado"/>
     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{Object.keys(QUOTE_STATUS).map(s=><Chip key={s} active={qt.status===s} onClick={()=>setStatus(s)}>{QUOTE_STATUS[s].label}</Chip>)}</div>
     {qt.simIds&&qt.simIds.length>0&&<><Section title={`Simulaciones adjuntas (${qt.simIds.length})`}/>
-      <div style={{display:"flex",gap:8}}>{qt.simIds.slice(0,3).map(sid=><div key={sid} style={{flex:1,borderRadius:10,overflow:"hidden",border:`1px solid ${C.line}`}}><SimImg simId={sid} style={{width:"100%",aspectRatio:"1",objectFit:"cover",display:"block"}}/></div>)}</div>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>{qt.simIds.slice(0,3).map(sid=>{const meta=(data.sims||[]).find(s=>s.id===sid);return meta?<SimPair key={sid} sim={meta} height={110}/>:<div key={sid} style={{borderRadius:10,overflow:"hidden",border:`1px solid ${C.line}`}}><SimImg simId={sid} style={{width:"100%",height:110,objectFit:"cover",display:"block"}}/></div>;})}</div>
       <div style={{fontSize:11.5,color:C.muted,marginTop:6}}>Se incluirán en el PDF del presupuesto.</div></>}
     <Section title="Texto del documento" action={<button onClick={()=>go("editDoc",id)} style={lnk}>Editar</button>}/>
     <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"4px 14px"}}>
@@ -1234,7 +1269,13 @@ function AIScreen({data,go,update,pre}){
       const small=await compressImage(result,1280,0.88);
       const id=uid("sim");
       await idbPut(id,small);
-      const meta={id,clientId,type,style,mode,desc,date:new Date().toISOString().slice(0,10)};
+      let hasBefore=false;
+      if(photo){
+        const smallBefore=await compressImage(photo,1280,0.85);
+        await idbPut(id+"_before",smallBefore);
+        hasBefore=true;
+      }
+      const meta={id,clientId,type,style,mode,desc,date:new Date().toISOString().slice(0,10),hasBefore};
       update(d=>({...d,sims:[meta,...(d.sims||[])]}));
       setSaved(true);
     }catch(e){ setErr("No se pudo guardar la imagen: "+e.message); }
@@ -1420,7 +1461,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    const swCode = "const CACHE='mmr-v6';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
+    const swCode = "const CACHE='mmr-v7';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
     const blob = new Blob([swCode], { type: 'application/javascript' });
     navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
   });
