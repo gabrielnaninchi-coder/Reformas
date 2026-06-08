@@ -572,23 +572,57 @@ function dataURLtoBlob(dataURL){
 
 /* EDICIÓN: parte de la foto real del usuario (fidelidad alta automática) */
 async function editAIImage(apiKey, photoDataURL, prompt, quality){
-  const form=new FormData();
-  form.append("model","gpt-image-2");
-  form.append("prompt",prompt);
-  form.append("n","1");
-  form.append("size","1024x1024");
-  if(quality) form.append("quality",quality);
   const blob=dataURLtoBlob(photoDataURL);
   const ext=(blob.type.includes("png"))?"png":(blob.type.includes("webp")?"webp":"jpg");
-  form.append("image[]", blob, "foto."+ext);
-  const res=await fetch("https://api.openai.com/v1/images/edits",{
-    method:"POST",
-    headers:{ "Authorization":"Bearer "+apiKey }, // sin Content-Type: el navegador pone el boundary
-    body: form,
-  });
+  // Construye el form. fieldName puede ser "image[]" o "image" (compatibilidad).
+  const build=(fieldName)=>{
+    const form=new FormData();
+    form.append("model","gpt-image-2");
+    form.append("prompt",prompt);
+    form.append("n","1");
+    form.append("size","1024x1024");
+    if(quality) form.append("quality",quality);
+    form.append(fieldName, blob, "foto."+ext);
+    return form;
+  };
+  const doFetch=async(fieldName)=>{
+    const ctrl=new AbortController();
+    const timer=setTimeout(()=>ctrl.abort(),120000); // 2 min máx
+    try{
+      const res=await fetch("https://api.openai.com/v1/images/edits",{
+        method:"POST",
+        headers:{ "Authorization":"Bearer "+apiKey }, // sin Content-Type: el navegador pone el boundary
+        body: build(fieldName),
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      return res;
+    }catch(netErr){
+      clearTimeout(timer);
+      // Error de red/CORS/abort: Safari devuelve "Load failed"
+      if(netErr.name==="AbortError") throw new Error("La generación tardó demasiado (más de 2 min) y se canceló. Inténtalo con calidad media o una foto más ligera.");
+      throw new Error("NETWORK"); // se gestiona arriba
+    }
+  };
+  let res;
+  try{
+    res = await doFetch("image[]");
+  }catch(e){
+    if(e.message==="NETWORK"){
+      // Reintento con nombre de campo alternativo
+      try{ res = await doFetch("image"); }
+      catch(e2){
+        throw new Error("No se pudo conectar con OpenAI (la app dice 'Load failed'). Causas posibles: 1) la organización de OpenAI no está verificada para imágenes, 2) la foto es demasiado grande, 3) sin conexión estable. Revisa también que tu clave tenga permiso 'Todo' y que tengas saldo.");
+      }
+    } else { throw e; }
+  }
   if(!res.ok){
     let msg="Error "+res.status;
     try{ const j=await res.json(); msg=j.error?.message||msg; }catch(e){}
+    // Mensajes más claros para los casos típicos
+    if(res.status===403) msg="OpenAI rechazó la petición (403). Lo más habitual: tu organización aún no está verificada para generar imágenes. Verifícala en platform.openai.com → Settings → Organization.";
+    if(res.status===401) msg="Clave API no válida o sin permisos (401). Revisa que la clave esté bien pegada y con permiso 'Todo'.";
+    if(res.status===429) msg="Límite alcanzado o sin saldo (429). Revisa tu saldo y límites en OpenAI.";
     throw new Error(msg);
   }
   const data=await res.json();
@@ -1262,8 +1296,10 @@ function AIScreen({data,go,update,pre}){
     try{
       let img;
       if(photo){
+        // Comprimir/normalizar la foto a JPEG <=1024px: evita fallos por HEIC o fotos enormes del carrete
+        const photoSafe=await compressImage(photo,1024,0.85);
         const prompt=buildReformPrompt(mode,type,style,desc);
-        img=await editAIImage(data.settings.apiKey,photo,prompt,q);
+        img=await editAIImage(data.settings.apiKey,photoSafe,prompt,q);
       }else{
         const prompt=`Fotografía realista de un/a ${type.toLowerCase()} reformado, estilo ${style.toLowerCase()}. ${desc||""}. Render fotorrealista de interiorismo, iluminación natural, alta calidad, sin texto ni personas.`;
         img=await generateAIImage(data.settings.apiKey,prompt,q);
@@ -1473,7 +1509,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    const swCode = "const CACHE='mmr-v9';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
+    const swCode = "const CACHE='mmr-v10';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
     const blob = new Blob([swCode], { type: 'application/javascript' });
     navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
   });
