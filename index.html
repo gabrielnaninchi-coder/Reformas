@@ -1293,10 +1293,16 @@ function AIScreen({data,go,update,pre}){
     if(!data.settings.apiKey){ setErr("Falta la clave API. Ve a Ajustes y añádela."); return; }
     setLoading(true);
     const q=data.settings.aiQuality||"high";
+    // Mantener la pantalla despierta durante la generación (si el navegador lo permite)
+    let wakeLock=null;
+    try{ if(navigator.wakeLock&&navigator.wakeLock.request){ wakeLock=await navigator.wakeLock.request("screen"); } }catch(e){}
+    // Detectar si la app se va a segundo plano (causa habitual de corte)
+    let wentBackground=false;
+    const onHide=()=>{ if(document.visibilityState==="hidden") wentBackground=true; };
+    document.addEventListener("visibilitychange",onHide);
     try{
       let img;
       if(photo){
-        // Comprimir/normalizar la foto a JPEG <=1024px: evita fallos por HEIC o fotos enormes del carrete
         const photoSafe=await compressImage(photo,1024,0.85);
         const prompt=buildReformPrompt(mode,type,style,desc);
         img=await editAIImage(data.settings.apiKey,photoSafe,prompt,q);
@@ -1306,7 +1312,18 @@ function AIScreen({data,go,update,pre}){
       }
       setResult(img);
     }
-    catch(e){ setErr(e.message); }
+    catch(e){
+      // Si la app estuvo en segundo plano, el corte casi seguro es por eso
+      if(wentBackground){
+        setErr("La generación se interrumpió porque la pantalla se apagó o saliste de la app. iOS pausa la app al hacerlo. Vuelve a pulsar Generar y mantén la pantalla encendida y la app abierta los ~30 segundos que tarda.");
+      } else {
+        setErr(e.message);
+      }
+    }
+    finally{
+      document.removeEventListener("visibilitychange",onHide);
+      try{ if(wakeLock) await wakeLock.release(); }catch(e){}
+    }
     setLoading(false);
   };
   const saveToClient=async()=>{
@@ -1362,6 +1379,8 @@ function AIScreen({data,go,update,pre}){
       {data.clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
     <button onClick={generate} disabled={loading} style={{...big,background:C.ink,color:C.paper,width:"100%",marginTop:16,opacity:loading?.6:1}}>
       <I.spark size={16} color={C.paper}/> {loading?"Generando… (10-40 s)":"Generar simulación"}</button>
+    {loading&&<div style={{display:"flex",gap:8,marginTop:12,padding:12,background:C.amber+"18",borderRadius:12,border:`1px solid ${C.amber}44`}}>
+      <I.warn size={20} color={C.amber}/><div style={{fontSize:12.5,color:C.ink,lineHeight:1.4}}><b>No bloquees el móvil ni salgas de la app.</b> Mantén esta pantalla abierta ~30 segundos hasta que aparezca el resultado.</div></div>}
     {err&&<div style={{display:"flex",gap:8,marginTop:12,padding:12,background:C.clay+"14",borderRadius:12,border:`1px solid ${C.clay}33`}}>
       <I.warn size={20} color={C.clay}/><div style={{fontSize:12.5,color:C.clayDk}}>{err}</div></div>}
     {result&&<>
@@ -1509,7 +1528,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    const swCode = "const CACHE='mmr-v10';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
+    const swCode = "const CACHE='mmr-v11';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
     const blob = new Blob([swCode], { type: 'application/javascript' });
     navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
   });
