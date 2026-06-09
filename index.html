@@ -31,7 +31,10 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script type="text/babel" data-presets="react">
 const { useState, useEffect } = React;
-const APP_VERSION = "v17";
+const APP_VERSION = "v18";
+// Servidor proxy que esconde la clave de OpenAI. La app habla con el proxy, no con OpenAI.
+const PROXY_URL = "https://mmr-proxy.vercel.app/api/generate";
+const APP_TOKEN = "mmr-valencia-2026-x7k9-reformas-secreto";
 // Analítica Umami: envía eventos sin afectar al funcionamiento de la app
 function track(eventName, eventData){
   try{
@@ -203,7 +206,7 @@ const SEED = {
   ],
   invoices:[],
   sims:[],
-  settings: { apiKey:"", pin:"", pinEnabled:false, aiQuality:"high" },
+  settings: { apiKey:"", pin:"", pinEnabled:false, aiQuality:"medium" },
 };
 
 /* ---------- Persistencia ---------- */
@@ -579,61 +582,38 @@ function dataURLtoBlob(dataURL){
   return new Blob([arr],{type:mime});
 }
 
-/* EDICIÓN: parte de la foto real del usuario (fidelidad alta automática) */
-async function editAIImage(apiKey, photoDataURL, prompt, quality){
-  const blob=dataURLtoBlob(photoDataURL);
-  const ext=(blob.type.includes("png"))?"png":(blob.type.includes("webp")?"webp":"jpg");
-  const form=new FormData();
-  form.append("model","gpt-image-2");
-  form.append("prompt",prompt);
-  form.append("n","1");
-  form.append("size","1024x1024");
-  if(quality) form.append("quality",quality);
-  form.append("image", blob, "foto."+ext);
+/* Llama al proxy (que esconde la clave de OpenAI). Sirve para foto+texto o solo texto. */
+async function callProxy(photoDataURL, prompt, quality){
   let res;
   try{
-    res=await fetch("https://api.openai.com/v1/images/edits",{
+    res=await fetch(PROXY_URL,{
       method:"POST",
-      headers:{ "Authorization":"Bearer "+apiKey }, // sin Content-Type: el navegador pone el boundary multipart
-      body: form,
+      headers:{ "Content-Type":"application/json", "X-App-Token":APP_TOKEN },
+      body: JSON.stringify({ prompt, photo: photoDataURL||null, quality: quality||"medium" }),
     });
   }catch(netErr){
-    throw new Error("No se pudo conectar con OpenAI. Revisa la conexión a internet e inténtalo de nuevo. (Detalle: "+(netErr.message||"red")+")");
+    throw new Error("No se pudo conectar con el servidor. Revisa la conexión a internet e inténtalo de nuevo. (Detalle: "+(netErr.message||"red")+")");
   }
   if(!res.ok){
     let msg="Error "+res.status;
-    try{ const j=await res.json(); msg=j.error?.message||msg; }catch(e){}
-    if(res.status===403) msg="OpenAI rechazó la petición (403): organización no verificada para imágenes, o la clave no tiene permiso. "+msg;
-    if(res.status===401) msg="Clave API no válida o sin permisos (401). "+msg;
-    if(res.status===429) msg="Límite o saldo agotado (429). "+msg;
+    try{ const j=await res.json(); msg=j.error||msg; }catch(e){}
+    if(res.status===401) msg="El servidor rechazó la petición (no autorizado). "+msg;
+    if(res.status===429) msg="Límite o saldo agotado. "+msg;
     throw new Error(msg);
   }
   const data=await res.json();
-  const b64=data.data?.[0]?.b64_json;
-  if(b64) return "data:image/png;base64,"+b64;
-  if(data.data?.[0]?.url) return data.data[0].url;
-  throw new Error("Respuesta inesperada de la API");
+  if(data.image) return data.image;
+  throw new Error("Respuesta inesperada del servidor");
+}
+
+/* EDICIÓN: parte de la foto real del usuario (fidelidad alta automática) */
+async function editAIImage(apiKey, photoDataURL, prompt, quality){
+  return callProxy(photoDataURL, prompt, quality);
 }
 
 /* GENERACIÓN pura desde texto (sin foto base) */
 async function generateAIImage(apiKey, prompt, quality){
-  const body = { model:"gpt-image-2", prompt, n:1, size:"1024x1024" };
-  if(quality) body.quality = quality;
-  const res = await fetch("https://api.openai.com/v1/images/generations",{
-    method:"POST",
-    headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+apiKey },
-    body: JSON.stringify(body),
-  });
-  if(!res.ok){
-    let msg = "Error "+res.status;
-    try{ const j=await res.json(); msg = j.error?.message || msg; }catch(e){}
-    throw new Error(msg);
-  }
-  const data = await res.json();
-  const b64 = data.data?.[0]?.b64_json;
-  if(b64) return "data:image/png;base64,"+b64;
-  if(data.data?.[0]?.url) return data.data[0].url;
-  throw new Error("Respuesta inesperada de la API");
+  return callProxy(null, prompt, quality);
 }
 
 /* ---------- GUARDARRAÍLES: construcción del prompt ---------- */
@@ -1275,9 +1255,8 @@ function AIScreen({data,go,update,pre}){
   const onFile=(e)=>{const f=e.target.files?.[0];if(f){const r=new FileReader();r.onload=()=>setPhoto(r.result);r.readAsDataURL(f);}};
   const generate=async()=>{
     setErr(""); setResult(null); setSaved(false);
-    if(!data.settings.apiKey){ setErr("Falta la clave API. Ve a Ajustes y añádela."); return; }
     setLoading(true);
-    const q=data.settings.aiQuality||"high";
+    const q=data.settings.aiQuality||"medium";
     // Mantener la pantalla despierta durante la generación (si el navegador lo permite)
     let wakeLock=null;
     try{ if(navigator.wakeLock&&navigator.wakeLock.request){ wakeLock=await navigator.wakeLock.request("screen"); } }catch(e){}
@@ -1336,8 +1315,6 @@ function AIScreen({data,go,update,pre}){
     <Header title="Simulación IA" onBack={go?(()=>go(clientId?"client":"home",clientId||null)):undefined}/>
     <div style={{background:`linear-gradient(135deg,${C.amber},${C.clay})`,color:"#fff",borderRadius:18,padding:18,display:"flex",gap:12,alignItems:"center"}}>
       <I.spark size={26} color="#fff"/><div style={{fontSize:13,lineHeight:1.4}}>Genera una visualización realista de la reforma <b>partiendo de tu foto</b>, conservando el espacio real.</div></div>
-    {!data.settings.apiKey&&<div style={{display:"flex",gap:8,marginTop:12,padding:12,background:C.amber+"18",borderRadius:12,border:`1px solid ${C.amber}44`}}>
-      <I.key size={20} color={C.amber}/><div style={{fontSize:12,color:C.ink}}>Necesitas configurar tu clave API de OpenAI en <b>Ajustes</b> para generar imágenes.</div></div>}
     <Section title="1 · Foto del espacio (la base real)"/>
     <label style={{display:"block"}}><input type="file" accept="image/*" capture="environment" onChange={onFile} style={{display:"none"}}/>
       <div style={{aspectRatio:"16/9",borderRadius:16,background:photo?"#000":C.line,display:"grid",placeItems:"center",color:C.muted,border:`1px dashed ${C.muted}66`,cursor:"pointer",overflow:"hidden"}}>
@@ -1430,13 +1407,12 @@ function LogoGenScreen({data,go}){
   const [loading,setLoading]=useState(false); const [err,setErr]=useState(""); const [saved,setSaved]=useState(false); const [saving,setSaving]=useState(false);
   const generate=async()=>{
     setErr(""); setResult(null); setSaved(false);
-    if(!data.settings.apiKey){ setErr("Falta la clave API de OpenAI. Añádela en Ajustes."); return; }
     setLoading(true);
     let wakeLock=null;
     try{ if(navigator.wakeLock&&navigator.wakeLock.request){ wakeLock=await navigator.wakeLock.request("screen"); } }catch(e){}
     try{
       const prompt=buildLogoPrompt({brand:company.name,initials,sector,style,textMode,symbol,colors});
-      const img=await generateAIImage(data.settings.apiKey,prompt,data.settings.aiQuality||"high");
+      const img=await generateAIImage(data.settings.apiKey,prompt,data.settings.aiQuality||"medium");
       setResult(img);
       track("logo-generado",{estilo:style, texto:textMode});
     }catch(e){ setErr(e.message); }
@@ -1459,9 +1435,6 @@ function LogoGenScreen({data,go}){
     <Header title="Crear logo con IA" onBack={()=>go("settings")}/>
     <div style={{background:`linear-gradient(135deg,${C.steel},${C.ink})`,color:"#fff",borderRadius:18,padding:18,display:"flex",gap:12,alignItems:"center"}}>
       <I.spark size={26} color="#fff"/><div style={{fontSize:13,lineHeight:1.4}}>Genera un logo profesional para <b>{company.name||"tu empresa"}</b>. Podrás usarlo en tus presupuestos y facturas.</div></div>
-    {!data.settings.apiKey&&<div style={{display:"flex",gap:8,marginTop:12,padding:12,background:C.amber+"18",borderRadius:12,border:`1px solid ${C.amber}44`}}>
-      <I.key size={20} color={C.amber}/><div style={{fontSize:12,color:C.ink}}>Necesitas tu clave API de OpenAI en <b>Ajustes</b>.</div></div>}
-
     <Section title="1 · Sector de tu empresa"/>
     <input value={sector} onChange={e=>setSector(e.target.value)} style={inp} placeholder="Ej: reformas, fontanería, electricidad…"/>
 
@@ -1539,7 +1512,7 @@ function SettingsScreen({data,update,go}){
   const [key,setKey]=useState(data.settings.apiKey);
   const [pin,setPin]=useState(data.settings.pin);
   const [pinOn,setPinOn]=useState(data.settings.pinEnabled);
-  const [quality,setQuality]=useState(data.settings.aiQuality||"high");
+  const [quality,setQuality]=useState(data.settings.aiQuality||"medium");
   const [showKey,setShowKey]=useState(false);
   const [logo,setLogo]=useState(null);
   const [logoMsg,setLogoMsg]=useState("");
@@ -1594,17 +1567,12 @@ function SettingsScreen({data,update,go}){
     </div>
     <Section title="Inteligencia artificial"/>
     <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:16,padding:16}}>
-      <label style={{display:"block"}}><div style={{fontSize:12,color:C.muted,marginBottom:5,fontWeight:600}}>Clave API de OpenAI</div>
-        <div style={{display:"flex",gap:8}}>
-          <input type={showKey?"text":"password"} value={key} onChange={e=>setKey(e.target.value)} placeholder="sk-..." style={{...inp,flex:1}}/>
-          <button onClick={()=>setShowKey(!showKey)} style={{...inp,width:54,cursor:"pointer",fontSize:12}}>{showKey?"Ocultar":"Ver"}</button>
-        </div></label>
-      <div style={{fontSize:11,color:C.muted,marginTop:8,lineHeight:1.5}}>Modelo <b>gpt-image-2</b> (ChatGPT Images 2.0). Se guarda solo en este móvil. La app llama a OpenAI directamente con tu clave. Configura un límite de gasto en tu panel de OpenAI.</div>
+      <div style={{fontSize:11.5,color:C.muted,lineHeight:1.5}}>Las simulaciones y logos se generan a través de un servidor seguro. No necesitas configurar ninguna clave: ya está todo listo para usar.</div>
       <label style={{display:"block",marginTop:12}}><div style={{fontSize:12,color:C.muted,marginBottom:5,fontWeight:600}}>Calidad de imagen</div>
         <div style={{display:"flex",gap:8}}>
           {[["low","Rápida"],["medium","Media"],["high","Alta (pro)"]].map(([v,l])=><Chip key={v} active={quality===v} onClick={()=>setQuality(v)}>{l}</Chip>)}
         </div></label>
-      <div style={{fontSize:11,color:C.muted,marginTop:6}}>Mayor calidad = mejor resultado pero más coste y algo más lenta.</div>
+      <div style={{fontSize:11,color:C.muted,marginTop:6}}>Mayor calidad = mejor resultado pero algo más lenta. La opción <b>Media</b> da muy buenos resultados.</div>
     </div>
     <Section title="Seguridad"/>
     <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:16,padding:16}}>
@@ -1696,7 +1664,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    const swCode = "const CACHE='mmr-v17';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(u.hostname.indexOf('umami')>-1){return;}e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
+    const swCode = "const CACHE='mmr-v18';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(u.hostname.indexOf('umami')>-1){return;}e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
     const blob = new Blob([swCode], { type: 'application/javascript' });
     navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
   });
