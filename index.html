@@ -31,7 +31,7 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script type="text/babel" data-presets="react">
 const { useState, useEffect } = React;
-const APP_VERSION = "v16";
+const APP_VERSION = "v17";
 // Analítica Umami: envía eventos sin afectar al funcionamiento de la app
 function track(eventName, eventData){
   try{
@@ -1507,6 +1507,33 @@ function LogoGenScreen({data,go}){
   </div>;
 }
 
+function PrivacyScreen({go}){
+  const P=({children})=><p style={{fontSize:13.5,color:C.ink,lineHeight:1.6,margin:"0 0 12px"}}>{children}</p>;
+  const H=({children})=><div style={{fontSize:14,fontWeight:700,color:C.ink,margin:"18px 0 8px"}}>{children}</div>;
+  return <div>
+    <Header title="Privacidad" onBack={()=>go("settings")}/>
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:16,padding:18,marginTop:8}}>
+      <P>Esta aplicación es una herramienta de gestión para tu actividad. Queremos ser transparentes sobre qué datos se guardan y cómo.</P>
+
+      <H>Tus datos de trabajo se quedan en tu dispositivo</H>
+      <P>Los clientes, presupuestos, facturas y simulaciones que creas se guardan únicamente en este teléfono (en el almacenamiento del navegador). No se envían a ningún servidor nuestro ni los podemos ver.</P>
+
+      <H>Estadísticas de uso anónimas</H>
+      <P>Para mejorar la aplicación, recogemos estadísticas de uso de forma anónima: número de veces que se abre la app y cuántas veces se usan funciones como crear un presupuesto, generar una factura o usar la simulación con IA.</P>
+      <P>Estas estadísticas NO incluyen datos personales, ni nombres, ni el contenido de tus presupuestos o clientes. No usamos cookies de seguimiento. No es posible identificar a ninguna persona a partir de estos datos.</P>
+
+      <H>Inteligencia artificial</H>
+      <P>Si usas la simulación de reformas o el generador de logos, las imágenes y textos que introduces se envían al proveedor de IA (OpenAI) para generar el resultado, usando tu propia clave. Te recomendamos no incluir datos personales en esas descripciones.</P>
+
+      <H>Tus derechos</H>
+      <P>Puedes borrar todos tus datos en cualquier momento desde Ajustes (botón "Restablecer datos"). Al hacerlo, se elimina todo lo guardado en este dispositivo.</P>
+
+      <div style={{fontSize:11.5,color:C.muted,marginTop:16,paddingTop:14,borderTop:`1px solid ${C.line}`,lineHeight:1.5}}>
+        Este texto es informativo y no constituye asesoramiento legal. Para un uso profesional ampliado, se recomienda revisión por un asesor especializado en protección de datos.</div>
+    </div>
+  </div>;
+}
+
 function SettingsScreen({data,update,go}){
   const [c,setC]=useState(data.company);
   const [key,setKey]=useState(data.settings.apiKey);
@@ -1591,7 +1618,8 @@ function SettingsScreen({data,update,go}){
       Versión MVP · PWA. Los datos se guardan en este dispositivo. La facturación con validez fiscal (VERI*FACTU) y la sincronización multi-dispositivo requieren backend (fase 2).</div>
     <button onClick={()=>{if(confirm("¿Restablecer TODO a datos de ejemplo? Se perderá lo creado.")){localStorage.removeItem(STORE_KEY);location.reload();}}}
       style={{...big,background:C.card,color:C.clayDk,border:`1px solid ${C.line}`,width:"100%",marginTop:12}}><I.trash size={16} color={C.clayDk}/> Restablecer datos</button>
-    <div style={{textAlign:"center",fontSize:12,color:C.muted,marginTop:18,fontWeight:600}}>MMR · Gestión — versión {APP_VERSION}</div>
+    <button onClick={()=>go&&go("privacy")} style={{...big,background:"none",color:C.steel,border:"none",width:"100%",marginTop:6,fontSize:13,textDecoration:"underline"}}>Privacidad y datos</button>
+    <div style={{textAlign:"center",fontSize:12,color:C.muted,marginTop:12,fontWeight:600}}>MMR · Gestión — versión {APP_VERSION}</div>
   </div>;
 }
 
@@ -1623,7 +1651,7 @@ function App(){
 
   if(locked) return <PinGate pin={data.settings.pin} onOk={()=>setUnlocked(true)}/>;
 
-  const activeTab=({client:"clients",newClient:"clients",project:"projects",newProject:"projects",quote:"quotes",newQuote:"quotes",editDoc:"quotes",catalog:"quotes",invoice:"invoices",logoGen:"settings"})[screen]||screen;
+  const activeTab=({client:"clients",newClient:"clients",project:"projects",newProject:"projects",quote:"quotes",newQuote:"quotes",editDoc:"quotes",catalog:"quotes",invoice:"invoices",logoGen:"settings",privacy:"settings"})[screen]||screen;
   const render=()=>{
     switch(screen){
       case "home": return <HomeScreen data={data} go={go}/>;
@@ -1643,6 +1671,7 @@ function App(){
       case "ai": return <AIScreen data={data} go={go} update={update} pre={param}/>;
       case "settings": return <SettingsScreen data={data} update={update} go={go}/>;
       case "logoGen": return <LogoGenScreen data={data} go={go}/>;
+      case "privacy": return <PrivacyScreen go={go}/>;
       default: return <HomeScreen data={data} go={go}/>;
     }
   };
@@ -1667,7 +1696,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    const swCode = "const CACHE='mmr-v16';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(u.hostname.indexOf('umami')>-1){return;}e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
+    const swCode = "const CACHE='mmr-v17';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(u.hostname.indexOf('umami')>-1){return;}e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
     const blob = new Blob([swCode], { type: 'application/javascript' });
     navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
   });
