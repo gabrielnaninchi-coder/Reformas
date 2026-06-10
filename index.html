@@ -31,10 +31,23 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script type="text/babel" data-presets="react">
 const { useState, useEffect } = React;
-const APP_VERSION = "v18";
+const APP_VERSION = "v19";
 // Servidor proxy que esconde la clave de OpenAI. La app habla con el proxy, no con OpenAI.
 const PROXY_URL = "https://mmr-proxy.vercel.app/api/generate";
+const API_BASE = "https://mmr-proxy.vercel.app/api";
 const APP_TOKEN = "mmr-valencia-2026-x7k9-reformas-secreto";
+
+/* ---------- Sesión de usuario (login con cuenta) ---------- */
+const AUTH_KEY = "mmr_auth_v1";
+function getAuth(){
+  try{ const r=localStorage.getItem(AUTH_KEY); return r?JSON.parse(r):null; }catch(e){ return null; }
+}
+function setAuth(a){
+  try{ localStorage.setItem(AUTH_KEY, JSON.stringify(a)); }catch(e){}
+}
+function clearAuth(){
+  try{ localStorage.removeItem(AUTH_KEY); }catch(e){}
+}
 // Analítica Umami: envía eventos sin afectar al funcionamiento de la app
 function track(eventName, eventData){
   try{
@@ -695,6 +708,73 @@ function PinGate({pin,onOk}){
     </div>
   </div>;
 }
+
+/* ---------- Pantalla de acceso (login / registro) ---------- */
+function AuthScreen({onAuth}){
+  const [modo,setModo]=useState("login"); // "login" o "registro"
+  const [email,setEmail]=useState("");
+  const [password,setPassword]=useState("");
+  const [nombre,setNombre]=useState("");
+  const [cargando,setCargando]=useState(false);
+  const [error,setError]=useState("");
+
+  const enviar=async()=>{
+    setError("");
+    if(!email.trim()||!password){ setError("Escribe tu email y contraseña."); return; }
+    if(modo==="registro" && password.length<6){ setError("La contraseña debe tener al menos 6 caracteres."); return; }
+    setCargando(true);
+    try{
+      const ruta = modo==="registro" ? "/registro" : "/login";
+      const cuerpo = modo==="registro"
+        ? { email:email.trim(), password, nombre:nombre.trim() }
+        : { email:email.trim(), password };
+      const res = await fetch(API_BASE+ruta,{
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify(cuerpo)
+      });
+      const datos = await res.json().catch(()=>({}));
+      if(!res.ok){
+        setError(datos.error || "No se pudo completar. Inténtalo de nuevo.");
+        setCargando(false);
+        return;
+      }
+      // Guardamos el "carné" (token) y los datos del usuario
+      setAuth({ token: datos.token, usuario: datos.usuario });
+      onAuth();
+    }catch(e){
+      setError("No hay conexión con el servidor. Revisa tu internet e inténtalo otra vez.");
+      setCargando(false);
+    }
+  };
+
+  return <div style={{minHeight:"100vh",background:C.black,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px max(24px, env(safe-area-inset-left)) 24px max(24px, env(safe-area-inset-right))"}}>
+    <div style={{fontFamily:"Times,serif",fontSize:44,fontWeight:700,color:"#fff"}}>MMR</div>
+    <div style={{fontFamily:"Times,serif",fontStyle:"italic",fontSize:15,color:"#aaa",marginBottom:28}}>servicios</div>
+
+    <div style={{width:"100%",maxWidth:340,display:"flex",flexDirection:"column",gap:12}}>
+      <div style={{display:"flex",background:"#1a1a1a",borderRadius:12,padding:4,marginBottom:6}}>
+        <button onClick={()=>{setModo("login");setError("");}} style={{flex:1,padding:"10px",borderRadius:9,border:"none",cursor:"pointer",fontSize:14,fontWeight:600,background:modo==="login"?C.clay:"transparent",color:modo==="login"?"#fff":"#888"}}>Iniciar sesión</button>
+        <button onClick={()=>{setModo("registro");setError("");}} style={{flex:1,padding:"10px",borderRadius:9,border:"none",cursor:"pointer",fontSize:14,fontWeight:600,background:modo==="registro"?C.clay:"transparent",color:modo==="registro"?"#fff":"#888"}}>Crear cuenta</button>
+      </div>
+
+      {modo==="registro" && <input value={nombre} onChange={e=>setNombre(e.target.value)} placeholder="Tu nombre (opcional)" style={authInp}/>}
+      <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email" type="email" autoCapitalize="none" autoCorrect="off" inputMode="email" style={authInp}/>
+      <input value={password} onChange={e=>setPassword(e.target.value)} placeholder="Contraseña" type="password" style={authInp}/>
+
+      {error && <div style={{color:"#ff9b8a",fontSize:13,textAlign:"center",padding:"2px 4px"}}>{error}</div>}
+
+      <button onClick={enviar} disabled={cargando} style={{padding:"14px",borderRadius:12,border:"none",cursor:cargando?"default":"pointer",fontSize:15,fontWeight:700,background:cargando?"#555":C.clay,color:"#fff",marginTop:4}}>
+        {cargando ? "Un momento…" : (modo==="registro" ? "Crear cuenta" : "Entrar")}
+      </button>
+
+      <div style={{color:"#666",fontSize:12,textAlign:"center",marginTop:8,lineHeight:1.5}}>
+        {modo==="registro" ? "Al crear la cuenta podrás entrar desde cualquier dispositivo." : "¿Aún no tienes cuenta? Pulsa «Crear cuenta» arriba."}
+      </div>
+    </div>
+  </div>;
+}
+const authInp={width:"100%",boxSizing:"border-box",padding:"13px 15px",borderRadius:12,border:"1px solid #333",background:"#1a1a1a",fontSize:15,color:"#fff",outline:"none"};
 
 /* ---------- Pantallas ---------- */
 function HomeScreen({data,go}){
@@ -1510,8 +1590,6 @@ function PrivacyScreen({go}){
 function SettingsScreen({data,update,go}){
   const [c,setC]=useState(data.company);
   const [key,setKey]=useState(data.settings.apiKey);
-  const [pin,setPin]=useState(data.settings.pin);
-  const [pinOn,setPinOn]=useState(data.settings.pinEnabled);
   const [quality,setQuality]=useState(data.settings.aiQuality||"medium");
   const [showKey,setShowKey]=useState(false);
   const [logo,setLogo]=useState(null);
@@ -1536,7 +1614,7 @@ function SettingsScreen({data,update,go}){
     window.USER_LOGO=null; setLogo(null); setLogoMsg("Logo eliminado. Se usará el logo por defecto.");
   };
   const setF=(k)=>(e)=>setC({...c,[k]:e.target.value});
-  const save=()=>{ update(d=>({...d,company:c,settings:{...d.settings,apiKey:key,aiQuality:quality,pin:pin.slice(0,6),pinEnabled:pinOn&&pin.length>=4}})); alert("Ajustes guardados."); };
+  const save=()=>{ update(d=>({...d,company:c,settings:{...d.settings,apiKey:key,aiQuality:quality}})); alert("Ajustes guardados."); };
   return <div>
     <Header title="Ajustes"/>
     <Section title="Logo de tu empresa"/>
@@ -1574,19 +1652,17 @@ function SettingsScreen({data,update,go}){
         </div></label>
       <div style={{fontSize:11,color:C.muted,marginTop:6}}>Mayor calidad = mejor resultado pero algo más lenta. La opción <b>Media</b> da muy buenos resultados.</div>
     </div>
-    <Section title="Seguridad"/>
-    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:16,padding:16}}>
-      <label style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
-        <span style={{fontSize:14,color:C.ink}}>Bloqueo con PIN</span>
-        <input type="checkbox" checked={pinOn} onChange={e=>setPinOn(e.target.checked)} style={{width:20,height:20}}/></label>
-      {pinOn&&<Field label="PIN (4-6 dígitos)" type="number" value={pin} onChange={e=>setPin(e.target.value.slice(0,6))} inputMode="numeric"/>}
-    </div>
     <button onClick={save} style={{...big,background:C.clay,color:"#fff",width:"100%",marginTop:16}}>Guardar ajustes</button>
     <div style={{marginTop:14,padding:14,background:C.steel+"10",borderRadius:12,fontSize:11.5,color:C.steel,lineHeight:1.5}}>
       Versión MVP · PWA. Los datos se guardan en este dispositivo. La facturación con validez fiscal (VERI*FACTU) y la sincronización multi-dispositivo requieren backend (fase 2).</div>
     <button onClick={()=>{if(confirm("¿Restablecer TODO a datos de ejemplo? Se perderá lo creado.")){localStorage.removeItem(STORE_KEY);location.reload();}}}
       style={{...big,background:C.card,color:C.clayDk,border:`1px solid ${C.line}`,width:"100%",marginTop:12}}><I.trash size={16} color={C.clayDk}/> Restablecer datos</button>
     <button onClick={()=>go&&go("privacy")} style={{...big,background:"none",color:C.steel,border:"none",width:"100%",marginTop:6,fontSize:13,textDecoration:"underline"}}>Privacidad y datos</button>
+    <div style={{marginTop:18,paddingTop:16,borderTop:`1px solid ${C.line}`}}>
+      {getAuth()?.usuario?.email && <div style={{textAlign:"center",fontSize:12.5,color:C.muted,marginBottom:10}}>Sesión iniciada como <b style={{color:C.ink}}>{getAuth().usuario.email}</b></div>}
+      <button onClick={()=>{if(confirm("¿Cerrar sesión? Tendrás que volver a iniciar sesión la próxima vez.")){clearAuth();location.reload();}}}
+        style={{...big,background:C.card,color:C.ink,border:`1px solid ${C.line}`,width:"100%"}}>Cerrar sesión</button>
+    </div>
     <div style={{textAlign:"center",fontSize:12,color:C.muted,marginTop:12,fontWeight:600}}>MMR · Gestión — versión {APP_VERSION}</div>
   </div>;
 }
@@ -1604,20 +1680,21 @@ function App(){
   const [data,setData]=useState(loadData);
   const [screen,setScreen]=useState("home");
   const [param,setParam]=useState(null);
-  const [unlocked,setUnlocked]=useState(false);
+  const [auth,setAuthState]=useState(()=>getAuth());
 
   useEffect(()=>{ saveData(data); },[data]);
   useEffect(()=>{ idbGet("user_logo").then(d=>{ if(d) window.USER_LOGO=d; }).catch(()=>{}); },[]);
 
-  const locked = data.settings.pinEnabled && data.settings.pin && !unlocked;
+  // Si no hay sesión iniciada, mostramos la pantalla de acceso (login / registro)
+  if(!auth || !auth.token){
+    return <AuthScreen onAuth={()=>setAuthState(getAuth())}/>;
+  }
 
   const go=(s,p=null)=>{setScreen(s);setParam(p);const el=document.getElementById("scroll");if(el)el.scrollTop=0;window.scrollTo(0,0);};
   const update=(fn)=>setData(d=>fn(d));
   const addClient=(c)=>setData(d=>({...d,clients:[c,...d.clients]}));
   const addProject=(p)=>setData(d=>({...d,projects:[p,...d.projects]}));
   const addQuote=(q)=>setData(d=>({...d,quotes:[q,...d.quotes],company:{...d.company,nextNumber:(+d.company.nextNumber||204)+1}}));
-
-  if(locked) return <PinGate pin={data.settings.pin} onOk={()=>setUnlocked(true)}/>;
 
   const activeTab=({client:"clients",newClient:"clients",project:"projects",newProject:"projects",quote:"quotes",newQuote:"quotes",editDoc:"quotes",catalog:"quotes",invoice:"invoices",logoGen:"settings",privacy:"settings"})[screen]||screen;
   const render=()=>{
@@ -1664,7 +1741,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    const swCode = "const CACHE='mmr-v18';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(u.hostname.indexOf('umami')>-1){return;}e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
+    const swCode = "const CACHE='mmr-v19';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(u.hostname.indexOf('umami')>-1){return;}e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
     const blob = new Blob([swCode], { type: 'application/javascript' });
     navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
   });
