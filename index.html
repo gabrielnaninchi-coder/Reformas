@@ -32,7 +32,7 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script type="text/babel" data-presets="react">
 const { useState, useEffect } = React;
-const APP_VERSION = "v21";
+const APP_VERSION = "v22";
 // Servidor proxy que esconde la clave de OpenAI. La app habla con el proxy, no con OpenAI.
 const PROXY_URL = "https://mmr-proxy.vercel.app/api/generate";
 const API_BASE = "https://mmr-proxy.vercel.app/api";
@@ -679,10 +679,15 @@ function dataURLtoBlob(dataURL){
 /* Llama al proxy (que esconde la clave de OpenAI). Sirve para foto+texto o solo texto. */
 async function callProxy(photoDataURL, prompt, quality){
   let res;
+  // Recuperamos el token de sesión del usuario logueado (lo exige el proxy)
+  const auth = getAuth();
+  const sesionToken = auth && auth.token ? auth.token : null;
+  const cabeceras = { "Content-Type":"application/json", "X-App-Token":APP_TOKEN };
+  if(sesionToken) cabeceras["Authorization"] = "Bearer " + sesionToken;
   try{
     res=await fetch(PROXY_URL,{
       method:"POST",
-      headers:{ "Content-Type":"application/json", "X-App-Token":APP_TOKEN },
+      headers: cabeceras,
       body: JSON.stringify({ prompt, photo: photoDataURL||null, quality: quality||"medium" }),
     });
   }catch(netErr){
@@ -1822,7 +1827,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    const swCode = "const CACHE='mmr-v21';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(u.hostname.indexOf('umami')>-1){return;}e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
+    const swCode = "const CACHE='mmr-v22';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(u.hostname.indexOf('umami')>-1){return;}e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
     const blob = new Blob([swCode], { type: 'application/javascript' });
     navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
   });
