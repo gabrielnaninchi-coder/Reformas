@@ -28,10 +28,11 @@
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script type="text/babel" data-presets="react">
 const { useState, useEffect } = React;
-const APP_VERSION = "v20";
+const APP_VERSION = "v21";
 // Servidor proxy que esconde la clave de OpenAI. La app habla con el proxy, no con OpenAI.
 const PROXY_URL = "https://mmr-proxy.vercel.app/api/generate";
 const API_BASE = "https://mmr-proxy.vercel.app/api";
@@ -335,6 +336,49 @@ function computeQuote(quote,catalog){
 }
 
 /* ============================================================
+   VERI*FACTU — hash (huella) y QR  [EN PREPARACIÓN]
+   Basado en Orden HAC/1177/2024 art.13 + especificación AEAT.
+   ⚠️ Modo preparación: la factura aún NO se firma ni se envía a la AEAT.
+   Se marca como no válida fiscalmente hasta conectar la pasarela real.
+   ============================================================ */
+const VF_URL_QR_PRUEBAS = "https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?";
+
+// Calcula la huella SHA-256 (cadena clave=valor) — async (crypto del navegador)
+async function vfHuellaAlta(d){
+  const limpia = v => (v==null?"":String(v).trim());
+  const cadena =
+    "IDEmisorFactura=" + limpia(d.idEmisor) +
+    "&NumSerieFactura=" + limpia(d.numSerie) +
+    "&FechaExpedicionFactura=" + limpia(d.fechaExpedicion) +
+    "&TipoFactura=" + limpia(d.tipoFactura) +
+    "&CuotaTotal=" + limpia(d.cuotaTotal) +
+    "&ImporteTotal=" + limpia(d.importeTotal) +
+    "&Huella=" + limpia(d.huellaAnterior) +
+    "&FechaHoraHusoGenRegistro=" + limpia(d.fechaHoraHuso);
+  const buf = new TextEncoder().encode(cadena);
+  const hash = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,"0")).join("").toUpperCase();
+}
+
+// Construye la URL de cotejo (entorno pruebas) para el QR
+function vfURLcotejo(d){
+  const enc = encodeURIComponent;
+  return VF_URL_QR_PRUEBAS +
+    "nif=" + enc(d.nif) + "&numserie=" + enc(d.numSerie) +
+    "&fecha=" + enc(d.fecha) + "&importe=" + enc(Number(d.importeTotal).toFixed(2));
+}
+
+// Genera el QR como dataURL PNG usando qrcode-generator
+function vfQRDataURL(texto){
+  try{
+    const qr = qrcode(0, "M");
+    qr.addData(texto);
+    qr.make();
+    return qr.createDataURL(6, 0); // celda 6px, sin margen extra
+  }catch(e){ return null; }
+}
+
+/* ============================================================
    GENERACIÓN DE PDF (jsPDF) — formato MMR
    ============================================================ */
 function generateQuotePDF(quote, client, project, company, catalog, simPairs){
@@ -512,7 +556,7 @@ function generateQuotePDF(quote, client, project, company, catalog, simPairs){
 }
 
 /* ---------- PDF de FACTURA (variante del presupuesto) ---------- */
-function generateInvoicePDF(inv, client, company, catalog){
+async function generateInvoicePDF(inv, client, company, catalog){
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({unit:"mm",format:"a4"});
   const W = 210, M = 14;
@@ -577,6 +621,43 @@ function generateInvoicePDF(inv, client, company, catalog){
   doc.setFont("helvetica","normal");
   doc.text(" transferencia bancaria · "+(company.iban||""), M+26, y, {maxWidth:W-2*M-26});
   y+=10;
+
+  // ---- Bloque VERI*FACTU [EN PREPARACIÓN] ----
+  const cl2 = client||{};
+  const numSerie = String(inv.number||"");
+  let huella = "";
+  try{
+    huella = await vfHuellaAlta({
+      idEmisor: company.nif, numSerie, fechaExpedicion: inv.date,
+      tipoFactura: "F1", cuotaTotal: (t.ivaTotal||0).toFixed(2),
+      importeTotal: (t.total||0).toFixed(2), huellaAnterior: "",
+      fechaHoraHuso: new Date().toISOString()
+    });
+  }catch(e){ huella=""; }
+
+  const urlCotejo = vfURLcotejo({ nif: company.nif, numSerie, fecha: inv.date, importeTotal: t.total||0 });
+  const qrData = vfQRDataURL(urlCotejo);
+
+  // Recuadro
+  const bx=M, bw=W-2*M;
+  doc.setDrawColor(200,160,40); doc.setLineWidth(0.4); doc.roundedRect(bx,y,bw,30,2,2);
+  // QR a la izquierda
+  if(qrData){ try{ doc.addImage(qrData,"PNG",bx+3,y+3,24,24); }catch(e){} }
+  doc.setTextColor(150,110,10); doc.setFont("helvetica","bold"); doc.setFontSize(7);
+  doc.text("QR tributario", bx+3, y+29);
+  // Texto a la derecha
+  const tx=bx+32;
+  doc.setTextColor(170,120,10); doc.setFont("helvetica","bold"); doc.setFontSize(8);
+  doc.text("VERI*FACTU — EN PREPARACIÓN (no válido fiscalmente todavía)", tx, y+5, {maxWidth:bw-34});
+  doc.setTextColor(90,90,90); doc.setFont("helvetica","normal"); doc.setFontSize(6.5);
+  doc.text("Esta factura aún no ha sido firmada electrónicamente ni remitida a la AEAT. "+
+           "El QR y la huella se muestran a efectos de prueba durante el periodo de adaptación.",
+           tx, y+9.5, {maxWidth:bw-34});
+  doc.setFont("courier","normal"); doc.setFontSize(5.5); doc.setTextColor(120,120,120);
+  doc.text("Huella: "+(huella||"(no disponible)"), tx, y+20, {maxWidth:bw-34});
+  doc.text("Factura verificable en la sede electrónica de la AEAT", tx, y+26, {maxWidth:bw-34});
+  y+=34;
+
   doc.setTextColor(150,150,150); doc.setFontSize(7);
   doc.text("Documento de factura generado con Vistobra. Para validez fiscal completa (VERI*FACTU) consulte con su asesoría.", M, y, {maxWidth:W-2*M});
   return doc;
@@ -1260,10 +1341,10 @@ function InvoiceScreen({data,id,go,update}){
   if(!inv) return null;
   const t=computeQuote(inv,data.catalog);
   const setStatus=(s)=>update(d=>({...d,invoices:d.invoices.map(x=>x.id===id?{...x,status:s}:x)}));
-  const makePDF=(action)=>{
+  const makePDF=async(action)=>{
     setBusy(true);
     try{
-      const doc=generateInvoicePDF(inv,cl,data.company,data.catalog);
+      const doc=await generateInvoicePDF(inv,cl,data.company,data.catalog);
       const fname=`Factura_${inv.number}_${(cl?.name||"cliente").replace(/\s/g,"_")}.pdf`;
       if(action==="share"&&navigator.canShare){
         const blob=doc.output("blob"); const file=new File([blob],fname,{type:"application/pdf"});
@@ -1741,7 +1822,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    const swCode = "const CACHE='mmr-v20';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(u.hostname.indexOf('umami')>-1){return;}e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
+    const swCode = "const CACHE='mmr-v21';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(u.hostname.indexOf('umami')>-1){return;}e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
     const blob = new Blob([swCode], { type: 'application/javascript' });
     navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
   });
