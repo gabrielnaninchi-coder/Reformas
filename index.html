@@ -52,7 +52,7 @@ window.addEventListener("load", function(){
 </script>
 <script type="text/babel" data-presets="react">
 const { useState, useEffect } = React;
-const APP_VERSION = "v25";
+const APP_VERSION = "v26";
 // Servidor proxy que esconde la clave de OpenAI. La app habla con el proxy, no con OpenAI.
 const PROXY_URL = "https://mmr-proxy.vercel.app/api/generate";
 const API_BASE = "https://mmr-proxy.vercel.app/api";
@@ -905,7 +905,7 @@ function HomeScreen({data,go}){
   return <div>
     <div style={{padding:"6px 0 4px"}}>
       <div style={{fontSize:13,color:C.muted}}>{data.company.brand}</div>
-      <h1 style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:600,color:C.ink,margin:"2px 0 0"}}>Hola, Mariano 👋</h1>
+      <h1 style={{fontFamily:"Fraunces,serif",fontSize:26,fontWeight:600,color:C.ink,margin:"2px 0 0"}}>Hola, {(()=>{const u=getAuth()?.usuario; const n=(u?.nombre||"").trim(); if(n) return n.split(" ")[0]; const e=(u?.email||"").trim(); if(e) return e.split("@")[0]; return "bienvenido";})()} 👋</h1>
     </div>
 
     {/* Acción principal */}
@@ -1783,11 +1783,95 @@ const TABS=[
   {key:"settings",label:"Ajustes",icon:I.cog},
 ];
 
+
+/* ---------- Tutorial de bienvenida (solo primera vez) ---------- */
+const TOUR_STEPS = [
+  {
+    emoji:"👋",
+    title:"Bienvenido a Vistobra",
+    body:"Te enseñamos en un minuto cómo funciona. Son unos pocos pasos: puedes salir cuando quieras tocando «Saltar».",
+    tag:"Empecemos"
+  },
+  {
+    emoji:"🏠",
+    title:"Inicio",
+    body:"Tu pantalla principal. Aquí ves de un vistazo lo que tienes por enviar, lo que espera respuesta del cliente y lo que está listo para facturar. El botón grande crea un presupuesto al instante.",
+    tag:"Sección Inicio"
+  },
+  {
+    emoji:"👥",
+    title:"Clientes",
+    body:"El corazón de la app. Cada cliente guarda sus datos, sus presupuestos, sus facturas y su historial. Crea uno con «Nuevo cliente» y todo lo demás cuelga de ahí.",
+    tag:"Sección Clientes"
+  },
+  {
+    emoji:"📄",
+    title:"Presupuestos",
+    body:"Crea presupuestos profesionales en PDF en segundos. Puedes partir de cero o usar «Foto + IA»: haces una foto de la obra y la inteligencia artificial te ayuda a describir los trabajos.",
+    tag:"Sección Presupuestos"
+  },
+  {
+    emoji:"🧾",
+    title:"Facturas",
+    body:"Cuando un cliente acepta un presupuesto, lo conviertes en factura con un toque. Calcula IVA, IRPF e inversión del sujeto pasivo automáticamente, pensado para reformas.",
+    tag:"Sección Facturas",
+    note:"Próximamente: envío VERI*FACTU a la AEAT. El motor ya está integrado y se activará en cuanto esté la firma digital lista. Te avisaremos."
+  },
+  {
+    emoji:"⚙️",
+    title:"Ajustes — ¡pon tu marca!",
+    body:"Aquí personalizas la app con los datos de tu negocio. Lo más importante: puedes subir tu propio logotipo para que aparezca en tus presupuestos y facturas. Si no subes ninguno, se usa el de Vistobra.",
+    tag:"Sección Ajustes",
+    note:"El nombre «Vistobra» permanece siempre como sello de la herramienta, junto a tu marca."
+  },
+  {
+    emoji:"🚀",
+    title:"¡Todo listo!",
+    body:"Ya conoces lo esencial. Empieza creando tu primer cliente o tu primer presupuesto. Si necesitas volver a ver esto, está todo explicado dentro de cada sección.",
+    tag:"A trabajar"
+  },
+];
+
+function WelcomeTour({onClose}){
+  const [i,setI]=useState(0);
+  const step=TOUR_STEPS[i];
+  const last=i===TOUR_STEPS.length-1;
+  const first=i===0;
+  return <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(17,17,17,.72)",backdropFilter:"blur(3px)",display:"flex",alignItems:"center",justifyContent:"center",padding:"24px max(20px,env(safe-area-inset-left)) 24px max(20px,env(safe-area-inset-right))"}}>
+    <div style={{background:C.card,borderRadius:24,maxWidth:380,width:"100%",padding:"28px 24px 22px",boxShadow:"0 20px 60px rgba(0,0,0,.4)",position:"relative"}}>
+      {/* progreso */}
+      <div style={{display:"flex",gap:5,justifyContent:"center",marginBottom:22}}>
+        {TOUR_STEPS.map((_,k)=><div key={k} style={{height:5,borderRadius:3,flex:k===i?2:1,background:k===i?C.clay:(k<i?C.amber:C.line),transition:"all .25s"}}/>)}
+      </div>
+      <div style={{fontSize:46,textAlign:"center",marginBottom:10}}>{step.emoji}</div>
+      <div style={{textAlign:"center",fontSize:11.5,fontWeight:700,letterSpacing:".06em",textTransform:"uppercase",color:C.clay,marginBottom:8}}>{step.tag}</div>
+      <h2 style={{fontFamily:"Fraunces,serif",fontSize:23,fontWeight:600,color:C.ink,textAlign:"center",margin:"0 0 12px"}}>{step.title}</h2>
+      <p style={{fontSize:14.5,lineHeight:1.55,color:C.ink,textAlign:"center",margin:"0 0 4px",opacity:.85}}>{step.body}</p>
+      {step.note && <div style={{marginTop:14,background:C.amber+"18",border:`1px solid ${C.amber}55`,borderRadius:12,padding:"11px 13px",fontSize:12.8,lineHeight:1.5,color:C.ink}}>💡 {step.note}</div>}
+      {/* botones */}
+      <div style={{display:"flex",gap:10,marginTop:22,alignItems:"center"}}>
+        {!last && <button onClick={onClose} style={{background:"none",border:"none",color:C.muted,fontSize:13.5,fontWeight:600,cursor:"pointer",padding:"10px 4px"}}>Saltar</button>}
+        <div style={{flex:1}}/>
+        {!first && <button onClick={()=>setI(i-1)} style={{background:"none",border:`1px solid ${C.line}`,color:C.ink,fontSize:14,fontWeight:600,cursor:"pointer",padding:"11px 18px",borderRadius:12}}>Atrás</button>}
+        <button onClick={()=>last?onClose():setI(i+1)} style={{background:C.clay,border:"none",color:"#fff",fontSize:14.5,fontWeight:700,cursor:"pointer",padding:"11px 22px",borderRadius:12}}>{last?"¡Empezar!":"Siguiente"}</button>
+      </div>
+    </div>
+  </div>;
+}
+
 function App(){
   const [data,setData]=useState(loadData);
   const [screen,setScreen]=useState("home");
   const [param,setParam]=useState(null);
   const [auth,setAuthState]=useState(()=>getAuth());
+  const [showTour,setShowTour]=useState(false);
+  // Mostrar el tutorial solo la primera vez que el usuario entra con sesión
+  useEffect(()=>{
+    if(auth && auth.token){
+      try{ if(!localStorage.getItem("vistobra_tour_done")) setShowTour(true); }catch(e){}
+    }
+  },[auth]);
+  const closeTour=()=>{ try{ localStorage.setItem("vistobra_tour_done","1"); }catch(e){} setShowTour(false); };
 
   useEffect(()=>{ saveData(data); },[data]);
   useEffect(()=>{ idbGet("user_logo").then(d=>{ if(d) window.USER_LOGO=d; }).catch(()=>{}); },[]);
@@ -1828,6 +1912,7 @@ function App(){
     }
   };
   return <div style={{minHeight:"100vh",background:C.paper,display:"flex",flexDirection:"column",fontFamily:"'Public Sans',-apple-system,sans-serif",maxWidth:480,margin:"0 auto"}}>
+    {showTour && <WelcomeTour onClose={closeTour}/>}
     <div id="scroll" style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"calc(12px + env(safe-area-inset-top)) max(18px, env(safe-area-inset-left)) calc(18px + env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-right))"}}>{render()}</div>
     <div style={{display:"flex",background:C.card,borderTop:`1px solid ${C.line}`,padding:"8px 4px calc(10px + env(safe-area-inset-bottom))",flexShrink:0}}>
       {TABS.map(t=>{const on=activeTab===t.key;return <button key={t.key} onClick={()=>go(t.key)} style={{flex:1,background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,color:on?C.clay:C.muted,padding:"4px 0"}}>
@@ -1848,7 +1933,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    const swCode = "const CACHE='mmr-v25';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(u.hostname.indexOf('umami')>-1){return;}e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
+    const swCode = "const CACHE='mmr-v26';self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(u.hostname.indexOf('umami')>-1){return;}e.respondWith(caches.open(CACHE).then(c=>c.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(e.request.method==='GET'&&r.status===200){c.put(e.request,r.clone());}return r;}).catch(()=>h))));});";
     const blob = new Blob([swCode], { type: 'application/javascript' });
     navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
   });
